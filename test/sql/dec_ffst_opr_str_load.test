@@ -1,0 +1,10 @@
+# name: test/sql/dec_ffst_opr_str_load.test
+# description: Test loading FSST
+# group: [fls]
+
+require fast_lanes
+
+query I
+CREATE TABLE fls_table AS SELECT * FROM read_fls("/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/data/fls/dec_fsst_opr_");
+----
+true
