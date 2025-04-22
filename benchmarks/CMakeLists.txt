@@ -11,7 +11,7 @@ project(duckdb_benchmarks)
 include_directories(${CMAKE_SOURCE_DIR}/duckdb/src/include)
 
 # Link against DuckDB library
-add_executable(benchmark benchmark.cpp)
+add_executable(benchmark benchmark.cpp generate_data.cpp bench_duckdb_vectorbuffer.cpp bench_fsst_interface.cpp)
 #add_executable(generate generate_data.cpp)
 
 # Ensure DuckDB is linked correctly

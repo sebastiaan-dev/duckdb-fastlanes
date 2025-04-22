@@ -10,7 +10,7 @@
 #include <fls/expression/slpatch_operator.hpp>
 #include <fls/expression/cross_rle_operator.hpp>
 // #include <fls/expression/fsst_expression.hpp>
-// #include <fls/expression/fsst12_expression.hpp>
+#include <fls/expression/fsst12_expression.hpp>
 // #include <fls/expression/fsst_expression.hpp>
 #include <fls/expression/fsst_expression.hpp>
 #include <fls/expression/physical_expression.hpp>
@@ -194,8 +194,8 @@ void decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_va
  * TODO: Are we allocating enough memory to copy into the DataChunk from DuckDB?
  */
 struct material_visitor {
-	explicit material_visitor(const fastlanes::n_t vec_idx, Vector &target_col)
-	    : vec_idx(vec_idx), target_col(target_col) {};
+	explicit material_visitor(const fastlanes::n_t vec_idx, Vector &target_col, FastLanesReadGlobalState &global_state)
+	    : vec_idx(vec_idx), target_col(target_col), global_state(global_state) {};
 
 	/**
 	 * Unpack uncompressed values (no decoding required).
@@ -287,66 +287,38 @@ struct material_visitor {
 	 *
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_opr> &opr) const {
-		std::cout << "dec_fsst_opr" << '\n';
+		const auto target_ptr = FlatVector::GetData<string_t>(target_col);
+		auto buffer = make_buffer<VectorStringBuffer>();
+		auto* in_byte_arr = reinterpret_cast<uint8_t*>(opr->fsst_bytes_segment_view.data);
 
-		const auto target_ptr = FlatVector::GetData<str_pointer>(target_col);
+		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
+			generated::untranspose::fallback::scalar::untranspose_i(opr->offset_arr, opr->untrasposed_offset);
 
-		unique_ptr<vector<vector<uint8_t>>> buffer(new vector<vector<uint8_t>>);
-		buffer->resize(fastlanes::CFG::VEC_SZ);
+			fastlanes::len_t encoded_size {0};
+			fastlanes::ofs_t offset {0};
 
-		for (size_t idx {0}; idx < 1024; ++idx) {
-			auto& vec_ref = (*buffer)[idx];
+			if (i == 0) {
+				encoded_size = opr->untrasposed_offset[0];
+			} else {
+				offset                 = opr->untrasposed_offset[i - 1];
+				const auto offset_next = opr->untrasposed_offset[i];
+				encoded_size           = offset_next - offset;
+			}
 
-			std::string init_str = "1234";
-			vector<u_int8_t> string_buffer(init_str.begin(), init_str.end());
-			vec_ref = string_buffer;
+			const auto decoded_size = static_cast<fastlanes::ofs_t>(fsst_decompress(
+			   &opr->fsst_decoder, encoded_size, in_byte_arr, fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
+			in_byte_arr += encoded_size;
 
+			string_t tmp = buffer->EmptyString(decoded_size);
+			auto data_ptr = tmp.GetDataWriteable();
+			memcpy(data_ptr, opr->tmp_string.data(), decoded_size);
 
-			target_ptr[idx].length = 5;
-			memcpy(target_ptr[idx].prefix, vec_ref.data(), string_t::PREFIX_LENGTH);
-			target_ptr[idx].ptr = reinterpret_cast<char *>(vec_ref.data());
-		};
+			target_ptr[i] = tmp;
+		}
 
-		// unique_ptr<vector<vector<uint8_t>>> buffer(new vector<vector<uint8_t>>);
-		// buffer->resize(fastlanes::CFG::VEC_SZ);
+		target_col.SetAuxiliary(buffer);
 
-		/// START NO FSST
-		// const auto target = FlatVector::GetData<string_t>(target_col);
-		// /// START DECODE
-		// auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst_bytes_segment_view.data);
-		//
-		// // Loop over all string entries in the vector.
-		// for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
-		// 	generated::untranspose::fallback::scalar::untranspose_i(opr->offset_arr, opr->untrasposed_offset);
-		//
-		// 	fastlanes::len_t encoded_size {0};
-		// 	fastlanes::ofs_t offset {0};
-		//
-		// 	if (i == 0) {
-		// 		encoded_size = opr->untrasposed_offset[0];
-		// 	} else {
-		// 		offset = opr->untrasposed_offset[i - 1];
-		// 		const auto offset_next = opr->untrasposed_offset[i];
-		// 		encoded_size = offset_next - offset;
-		// 	}
-		//
-		// 	vector<u_int8_t> string_buffer(fastlanes::CFG::String::max_bytes_per_string);
-		// 	// Decode the compressed string into the opr->tmp_string.data() buffer, return the bytesize
-		// 	const auto decoded_size = static_cast<fastlanes::ofs_t>(
-		// 	    fsst_decompress(&opr->fsst_decoder, encoded_size, in_byte_arr,
-		// 	                    fastlanes::CFG::String::max_bytes_per_string, string_buffer.data()));
-		// 	buffer->push_back(string_buffer);
-		//
-		// 	// Ensure that the decoded size fits in the buffer.
-		// 	FLS_ASSERT_L(decoded_size, opr->tmp_string.capacity())
-		//
-		// 	// auto current_string = buffer->get(i);
-		// 	// auto test = opr->tmp_string.data();
-		// 	target[i] = StringVector::AddString(target_col, reinterpret_cast<const char *>(buffer->get(i).data()),
-		// decoded_size);
-		// }
-		/// END DECODE
-		/// END NO FSST
+		// std::cout << "copied" << '\n';
 
 		/// START FSST
 
@@ -411,6 +383,53 @@ struct material_visitor {
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_opr> &opr) const {
 		std::cout << "dec_fsst12_opr" << '\n';
+
+		const auto start = std::chrono::high_resolution_clock::now();
+
+		const auto target_ptr = FlatVector::GetData<string_t>(target_col);
+		auto buffer = make_buffer<VectorStringBuffer>();
+		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst12_bytes_segment_view.data);
+
+		// for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
+		// 	auto* test = reinterpret_cast<fastlanes::len_t *>(opr->fsst12_length_segment_view.data);
+		// 	std::cout << test[i] << '\n';
+		// }
+
+		std::cout << "decoded" << '\n';
+
+		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
+			std::cout << "iterate " << i << '\n';
+			generated::untranspose::fallback::scalar::untranspose_i(opr->offset_arr, opr->untrasposed_offset);
+			std::cout << "iterate " << i << '\n';
+			fastlanes::len_t encoded_size {0};
+			fastlanes::ofs_t offset {0};
+			std::cout << "iterate " << i << '\n';
+			if (i == 0) {
+				encoded_size = opr->untrasposed_offset[0];
+			} else {
+				offset = opr->untrasposed_offset[i - 1];
+				const auto offset_next = opr->untrasposed_offset[i];
+				encoded_size = offset_next - offset;
+			}
+			std::cout << "iterate " << i << '\n';
+			const auto decoded_size = static_cast<fastlanes::ofs_t>(
+			    fsst12_decompress(&opr->fsst12_decoder, encoded_size, in_byte_arr,
+			                      fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
+			std::cout << "decoded " << i << '\n';
+			in_byte_arr += encoded_size;
+			std::cout << "iterate " << i << '\n';
+			string_t tmp = buffer->EmptyString(decoded_size);
+			auto data_ptr = tmp.GetDataWriteable();
+			memcpy(data_ptr, opr->tmp_string.data(), decoded_size);
+
+			target_ptr[i] = tmp;
+		}
+
+		target_col.SetAuxiliary(buffer);
+
+		const auto end = std::chrono::high_resolution_clock::now();
+		const std::chrono::duration<double> elapsed = (end - start);
+		std::cout << elapsed << '\n';
 
 		// target_col.SetVectorType(VectorType::FSST_VECTOR);
 		// auto &fsst_string_buffer = target_col.GetAuxiliary().get()->Cast<VectorFSSTStringBuffer>();
@@ -565,6 +584,7 @@ struct material_visitor {
 
 	fastlanes::n_t vec_idx;
 	Vector &target_col;
+	FastLanesReadGlobalState &global_state;
 };
 
 //-------------------------------------------------------------------
@@ -632,7 +652,7 @@ static unique_ptr<FunctionData> BindFn(ClientContext &context, TableFunctionBind
 //-------------------------------------------------------------------
 // Table
 //-------------------------------------------------------------------
-static void LoadFlsVector(const FastLanesReadGlobalState &global_state, TableFunctionInput &data, DataChunk &output,
+static void LoadFlsVector(FastLanesReadGlobalState &global_state, TableFunctionInput &data, DataChunk &output,
                           int16_t offset) {
 	const auto &local_state = data.local_state->Cast<FastLanesReadLocalState>();
 
@@ -643,7 +663,8 @@ static void LoadFlsVector(const FastLanesReadGlobalState &global_state, TableFun
 		const auto expr = expressions[col_idx];
 
 		expr->PointTo(global_state.cur_vector);
-		visit(material_visitor {global_state.cur_vector, target_col}, expr->operators[expr->operators.size() - 1]);
+		visit(material_visitor {global_state.cur_vector, target_col, global_state},
+		      expr->operators[expr->operators.size() - 1]);
 	}
 }
 

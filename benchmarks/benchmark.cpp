@@ -1,4 +1,10 @@
+#include "include/benchmark.hpp"
+
 #include "duckdb.hpp"
+#include "include/bench_duckdb_vectorbuffer.hpp"
+#include "include/bench_fsst_interface.h"
+#include "include/generate_data.hpp"
+
 #include <iostream>
 #include <numeric>
 #include <fls/connection.hpp>
@@ -10,16 +16,9 @@
  * - EXP_UNCOMPRESSED_U08 is not supported.
  * - Single column with NULL values cannot be read
  */
-struct Benchmark {
-	static const std::filesystem::path base_dir;
-	static const std::unordered_map<fastlanes::OperatorToken, std::string> token_to_variant;
-
-	std::string name;
-	std::vector<fastlanes::OperatorToken> variants;
-};
 
 const std::filesystem::path Benchmark::base_dir =
-    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/data";
+    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/footer-benchmark";
 const std::unordered_map<fastlanes::OperatorToken, std::string> Benchmark::token_to_variant = {
     // Uncompressed encodings
     {fastlanes::OperatorToken::EXP_UNCOMPRESSED_U08, "uint8"},
@@ -73,58 +72,11 @@ const std::unordered_map<fastlanes::OperatorToken, std::string> Benchmark::token
     {fastlanes::OperatorToken::EXP_CROSS_RLE_DBL, "dbl"},
     {fastlanes::OperatorToken::EXP_CROSS_RLE_STR, "str"},
 
-	{fastlanes::OperatorToken::INVALID, ""},
+    {fastlanes::OperatorToken::INVALID, ""},
 };
 
 void create_table(duckdb::Connection &conn) {
 	conn.Query("CREATE TABLE fls_table AS SELECT * FROM read_fls(\"/Users/sebastiaan/Downloads/equal_doubles\")");
-}
-
-void generate_fls_data(const Benchmark &benchmark, fastlanes::OperatorToken schema) {
-	const std::string &variant = Benchmark::token_to_variant.at(schema);
-	const std::filesystem::path source_dir = benchmark.base_dir / "source" / (benchmark.name + "_" + variant);
-	const std::filesystem::path dest_dir = benchmark.base_dir / "fls" / (benchmark.name + "_" + variant);
-
-	if (!exists(dest_dir)) {
-		create_directories(dest_dir);
-	} else {
-		return;
-	}
-
-	fastlanes::Connection conn;
-
-	if (schema == fastlanes::OperatorToken::INVALID) {
-		conn.reset().read(source_dir);
-	} else {
-		conn.set_sample_size(1);
-		conn.reset().read(source_dir).force_schema({schema});
-	}
-
-	conn.to_fls(dest_dir);
-}
-
-void generate_parquet_data(duckdb::Connection &conn, const Benchmark &benchmark, fastlanes::OperatorToken schema) {
-	const std::string &variant = Benchmark::token_to_variant.at(schema);
-	const std::filesystem::path source_dir = benchmark.base_dir / "source" / (benchmark.name + "_" + variant);
-	const std::filesystem::path dest_dir = benchmark.base_dir / "parquet" / (benchmark.name + "_" + variant);
-
-	if (!exists(dest_dir)) {
-		create_directories(dest_dir);
-	} else {
-		return;
-	}
-
-	const auto csv_file = source_dir / "data.csv";
-	const auto parquet_file = dest_dir / "data.parquet";
-
-	const std::string query = "COPY (SELECT * FROM read_csv_auto('" + csv_file.string() + "')) TO '" +
-	                          parquet_file.string() + "' (FORMAT 'parquet');";
-
-	if (const auto result = conn.Query(query); result->HasError()) {
-		std::cerr << "Error processing file " << csv_file << ": " << result->GetError() << '\n';
-	} else {
-		std::cout << "Successfully converted " << csv_file << " to " << parquet_file << '\n';
-	}
 }
 
 std::chrono::duration<double> profile_query(duckdb::Connection &conn, const std::string &query) {
@@ -142,10 +94,19 @@ std::chrono::duration<double> profile_query(duckdb::Connection &conn, const std:
 	return elapsed;
 }
 
-int main() {
-	duckdb::DuckDB db(nullptr); // In-memory instance
-	duckdb::Connection conn(db);
+void bench_source_independent(uint32_t iterations) {
+	// Run VectorBuffer allocation benchmarks
+	{
+		auto elapsed = Bench(BM_allocate_empty_string_12b_vector_buffer, iterations);
+		std::cout << "BM_allocate_empty_string_12b_vector_buffer: " << elapsed << '\n';
+	}
+	{
+		auto elapsed = Bench(BM_allocate_empty_string_max_vector_buffer, iterations);
+		std::cout << "BM_allocate_empty_string_max_vector_buffer: " << elapsed << '\n';
+	}
+}
 
+void generate_by_encoding() {
 	const std::vector<Benchmark> benchmarks = {
 	    Benchmark {"dec_uncompressed_opr",
 	               {fastlanes::OperatorToken::EXP_UNCOMPRESSED_I08, fastlanes::OperatorToken::EXP_UNCOMPRESSED_I16,
@@ -160,9 +121,9 @@ int main() {
 	               {fastlanes::OperatorToken::EXP_CONSTANT_I08, fastlanes::OperatorToken::EXP_CONSTANT_I16,
 	                fastlanes::OperatorToken::EXP_CONSTANT_I32, fastlanes::OperatorToken::EXP_CONSTANT_I64,
 	                fastlanes::OperatorToken::EXP_CONSTANT_DBL, fastlanes::OperatorToken::EXP_CONSTANT_STR}},
-		// TODO: Does not seem to work with enforced schema.
-	    Benchmark {"dec_fsst_opr", {fastlanes::OperatorToken::INVALID}},
-	    // Benchmark {"dec_fsst12_opr", {fastlanes::OperatorToken::EXP_FSST12_DELTA}},
+	    // TODO: Does not seem to work with enforced schema.
+	    Benchmark {"dec_fsst_opr", {fastlanes::OperatorToken::EXP_FSST_DELTA}},
+	    Benchmark {"dec_fsst12_opr", {fastlanes::OperatorToken::EXP_FSST12_DELTA}},
 	    // Benchmark {"dec_null_opr",
 	    //            {fastlanes::OperatorToken::EXP_NULL_I16, fastlanes::OperatorToken::EXP_NULL_I32,
 	    //             fastlanes::OperatorToken::EXP_NULL_DBL}},
@@ -179,12 +140,62 @@ int main() {
 		std::cout << benchmark.name << '\n';
 
 		for (const auto &variant : benchmark.variants) {
-			std::cout << Benchmark::token_to_variant.at(variant) << '\n';
+			std::cout << "Generating: " << Benchmark::token_to_variant.at(variant) << '\n';
 
-			generate_fls_data(benchmark, variant);
-			generate_parquet_data(conn, benchmark, variant);
+			// Generate Parquet and FLS files based on csv source files.
+			generate_data(benchmark, variant);
+		}
+
+		std::cout << "Finished generation" << '\n';
+	}
+}
+
+void bench_fsst(uint32_t iterations, const std::filesystem::path &path) {
+	{
+		auto elapsed = Bench(BM_buffer_tmp_copy, iterations, path);
+		std::cout << "BM_buffer_tmp_copy: " << elapsed << '\n';
+	}
+	{
+		auto elapsed = Bench(BM_mem_tmp_copy, iterations, path);
+		std::cout << "BM_mem_tmp_copy: " << elapsed << '\n';
+	}
+	{
+		auto elapsed = Bench(BM_mem_total_size, iterations, path);
+		std::cout << "BM_mem_total_size: " << elapsed << '\n';
+	}
+}
+
+void bench_source_dependent(uint32_t iterations) {
+	const std::filesystem::path data_root =
+	    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/footer-benchmark/fls";
+	std::vector<std::filesystem::path> dirs;
+
+	// Get all FastLanes files from the data_root directory
+	for (const auto &entry : std::filesystem::directory_iterator(data_root)) {
+		if (!entry.is_directory()) {
+			continue;
+		}
+		std::string filename = entry.path().filename().string();
+		dirs.push_back(entry.path());
+	}
+	// Sort the files by filename (not necessary but makes early analysis easier).
+	std::ranges::sort(dirs, [](const auto &a, const auto &b) { return a.filename().string() < b.filename().string(); });
+
+	for (const auto &path : dirs) {
+		// Benchmarks that only apply to FSST.
+		if (path.filename().string().find("fsst_") != std::string::npos) {
+			bench_fsst(iterations, path);
 		}
 	}
+}
+
+int main() {
+	uint32_t iterations = 10000;
+
+	generate_by_encoding();
+
+	// bench_source_independent(iterations);
+	bench_source_dependent(iterations);
 
 	return 0;
 }

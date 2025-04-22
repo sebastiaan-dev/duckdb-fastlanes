@@ -24,6 +24,8 @@ struct FastLanesReadGlobalState : public GlobalTableFunctionState {
 	uint16_t vec_sz_exp;
 	fastlanes::n_t n_vector;
 	atomic<fastlanes::n_t> cur_vector;
+
+	vector<uint8_t> byte_arr_vec;
 };
 
 class ReadFastLanes {
