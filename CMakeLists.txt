@@ -64,7 +64,7 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 #
 # Adjust the path below to where your local FastLanes source is located.
 include(CMakePrintHelpers)
-set(FASTLANES_DIR "/Users/sebastiaan/Documents/university/thesis/FastLanes")
+set(FASTLANES_DIR "/Users/sebastiaan/Documents/university/thesis/sebastiaan-fastlanes")
 ### TODO: enable
 option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 

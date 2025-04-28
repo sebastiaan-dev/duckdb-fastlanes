@@ -8,5 +8,4 @@ struct Benchmark {
 	static const std::unordered_map<fastlanes::OperatorToken, std::string> token_to_variant;
 
 	std::string name;
-	std::vector<fastlanes::OperatorToken> variants;
 };

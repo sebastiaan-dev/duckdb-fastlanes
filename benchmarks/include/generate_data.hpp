@@ -3,4 +3,4 @@
 #include "duckdb.hpp"
 #include "benchmark.hpp"
 
-void generate_data(const Benchmark &benchmark, const fastlanes::OperatorToken &variant);
+void generate_data(const std::filesystem::path &base_dir);

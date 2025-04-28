@@ -18,7 +18,8 @@
  */
 
 const std::filesystem::path Benchmark::base_dir =
-    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/footer-benchmark";
+    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/data";
+// "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/footer-benchmark";
 const std::unordered_map<fastlanes::OperatorToken, std::string> Benchmark::token_to_variant = {
     // Uncompressed encodings
     {fastlanes::OperatorToken::EXP_UNCOMPRESSED_U08, "uint8"},
@@ -108,66 +109,53 @@ void bench_source_independent(uint32_t iterations) {
 
 void generate_by_encoding() {
 	const std::vector<Benchmark> benchmarks = {
-	    Benchmark {"dec_uncompressed_opr",
-	               {fastlanes::OperatorToken::EXP_UNCOMPRESSED_I08, fastlanes::OperatorToken::EXP_UNCOMPRESSED_I16,
-	                fastlanes::OperatorToken::EXP_UNCOMPRESSED_I32, fastlanes::OperatorToken::EXP_UNCOMPRESSED_I64,
-	                fastlanes::OperatorToken::EXP_UNCOMPRESSED_DBL, fastlanes::OperatorToken::EXP_UNCOMPRESSED_STR}},
-	    Benchmark {"dec_unffor_opr",
-	               {fastlanes::OperatorToken::EXP_FFOR_I08, fastlanes::OperatorToken::EXP_FFOR_I16,
-	                fastlanes::OperatorToken::EXP_FFOR_I32, fastlanes::OperatorToken::EXP_FFOR_I64}},
-	    Benchmark {"dec_alp_opr", {fastlanes::OperatorToken::EXP_ALP_DBL}},
-	    Benchmark {"dec_alp_rd_opr", {fastlanes::OperatorToken::EXP_ALP_RD_DBL}},
-	    Benchmark {"dec_constant_opr",
-	               {fastlanes::OperatorToken::EXP_CONSTANT_I08, fastlanes::OperatorToken::EXP_CONSTANT_I16,
-	                fastlanes::OperatorToken::EXP_CONSTANT_I32, fastlanes::OperatorToken::EXP_CONSTANT_I64,
-	                fastlanes::OperatorToken::EXP_CONSTANT_DBL, fastlanes::OperatorToken::EXP_CONSTANT_STR}},
+	    // Benchmark {"dec_uncompressed_opr", {fastlanes::OperatorToken::EXP_UNCOMPRESSED_I16}},
+	    // {fastlanes::OperatorToken::EXP_UNCOMPRESSED_I08, fastlanes::OperatorToken::EXP_UNCOMPRESSED_I16,
+	    // fastlanes::OperatorToken::EXP_UNCOMPRESSED_I32, fastlanes::OperatorToken::EXP_UNCOMPRESSED_I64,
+	    // fastlanes::OperatorToken::EXP_UNCOMPRESSED_DBL, fastlanes::OperatorToken::EXP_UNCOMPRESSED_STR}},
+	    // Benchmark {"dec_unffor_opr",
+	    // {fastlanes::OperatorToken::EXP_FFOR_I08, fastlanes::OperatorToken::EXP_FFOR_I16,
+	    // fastlanes::OperatorToken::EXP_FFOR_I32, fastlanes::OperatorToken::EXP_FFOR_I64}},
+	    // Benchmark {"dec_alp_opr", {fastlanes::OperatorToken::EXP_ALP_DBL}},
+	    // Benchmark {"dec_alp_rd_opr", {fastlanes::OperatorToken::EXP_ALP_RD_DBL}},
+	    // Benchmark {"dec_constant_opr",
+	    //            {fastlanes::OperatorToken::EXP_CONSTANT_I08, fastlanes::OperatorToken::EXP_CONSTANT_I16,
+	    //             fastlanes::OperatorToken::EXP_CONSTANT_I32, fastlanes::OperatorToken::EXP_CONSTANT_I64,
+	    //             fastlanes::OperatorToken::EXP_CONSTANT_DBL, fastlanes::OperatorToken::EXP_CONSTANT_STR}},
 	    // TODO: Does not seem to work with enforced schema.
-	    Benchmark {"dec_fsst_opr", {fastlanes::OperatorToken::EXP_FSST_DELTA}},
-	    Benchmark {"dec_fsst12_opr", {fastlanes::OperatorToken::EXP_FSST12_DELTA}},
+	    // Benchmark {"dec_fsst_opr", {fastlanes::OperatorToken::EXP_FSST_DELTA}},
+	    // Benchmark {"dec_fsst12_opr", {fastlanes::OperatorToken::EXP_FSST12_DELTA}},
 	    // Benchmark {"dec_null_opr",
 	    //            {fastlanes::OperatorToken::EXP_NULL_I16, fastlanes::OperatorToken::EXP_NULL_I32,
 	    //             fastlanes::OperatorToken::EXP_NULL_DBL}},
-	    Benchmark {"dec_frequency_opr",
-	               {fastlanes::OperatorToken::EXP_FREQUENCY_I08, fastlanes::OperatorToken::EXP_FREQUENCY_I16,
-	                fastlanes::OperatorToken::EXP_FREQUENCY_I32, fastlanes::OperatorToken::EXP_FREQUENCY_I64,
-	                fastlanes::OperatorToken::EXP_FREQUENCY_DBL, fastlanes::OperatorToken::EXP_FREQUENCY_STR}},
-	    Benchmark {"dec_cross_rle_opr",
-	               {fastlanes::OperatorToken::EXP_CROSS_RLE_I08, fastlanes::OperatorToken::EXP_CROSS_RLE_I16,
-	                fastlanes::OperatorToken::EXP_CROSS_RLE_I32, fastlanes::OperatorToken::EXP_CROSS_RLE_I64,
-	                fastlanes::OperatorToken::EXP_CROSS_RLE_DBL, fastlanes::OperatorToken::EXP_CROSS_RLE_STR}}};
-
-	for (const auto &benchmark : benchmarks) {
-		std::cout << benchmark.name << '\n';
-
-		for (const auto &variant : benchmark.variants) {
-			std::cout << "Generating: " << Benchmark::token_to_variant.at(variant) << '\n';
-
-			// Generate Parquet and FLS files based on csv source files.
-			generate_data(benchmark, variant);
-		}
-
-		std::cout << "Finished generation" << '\n';
-	}
+	    // Benchmark {"dec_frequency_opr",
+	    //            {fastlanes::OperatorToken::EXP_FREQUENCY_I08, fastlanes::OperatorToken::EXP_FREQUENCY_I16,
+	    //             fastlanes::OperatorToken::EXP_FREQUENCY_I32, fastlanes::OperatorToken::EXP_FREQUENCY_I64,
+	    //             fastlanes::OperatorToken::EXP_FREQUENCY_DBL, fastlanes::OperatorToken::EXP_FREQUENCY_STR}},
+	    // // Benchmark {"dec_cross_rle_opr",
+	    // {fastlanes::OperatorToken::EXP_CROSS_RLE_I08, fastlanes::OperatorToken::EXP_CROSS_RLE_I16,
+	    // fastlanes::OperatorToken::EXP_CROSS_RLE_I32, fastlanes::OperatorToken::EXP_CROSS_RLE_I64,
+	    // fastlanes::OperatorToken::EXP_CROSS_RLE_DBL, fastlanes::OperatorToken::EXP_CROSS_RLE_STR}}
+	};
 }
 
 void bench_fsst(uint32_t iterations, const std::filesystem::path &path) {
 	{
 		auto elapsed = Bench(BM_buffer_tmp_copy, iterations, path);
-		std::cout << "BM_buffer_tmp_copy: " << elapsed << '\n';
+		std::cout << "BM_buffer_tmp_copy (" << path.filename().c_str() << "): " << elapsed << '\n';
 	}
 	{
 		auto elapsed = Bench(BM_mem_tmp_copy, iterations, path);
-		std::cout << "BM_mem_tmp_copy: " << elapsed << '\n';
+		std::cout << "BM_mem_tmp_copy (" << path.filename().c_str() << "): " << elapsed << '\n';
 	}
 	{
 		auto elapsed = Bench(BM_mem_total_size, iterations, path);
-		std::cout << "BM_mem_total_size: " << elapsed << '\n';
+		std::cout << "BM_mem_total_size (" << path.filename().c_str() << "): " << elapsed << '\n';
 	}
 }
 
 void bench_source_dependent(uint32_t iterations) {
-	const std::filesystem::path data_root =
-	    "/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/footer-benchmark/fls";
+	const std::filesystem::path data_root = Benchmark::base_dir / "fls";
 	std::vector<std::filesystem::path> dirs;
 
 	// Get all FastLanes files from the data_root directory
@@ -192,92 +180,10 @@ void bench_source_dependent(uint32_t iterations) {
 int main() {
 	uint32_t iterations = 10000;
 
-	generate_by_encoding();
+	generate_data(Benchmark::base_dir);
 
-	// bench_source_independent(iterations);
+	bench_source_independent(iterations);
 	bench_source_dependent(iterations);
 
 	return 0;
 }
-
-// std::vector<double> fls_create;
-// std::vector<double> parquet_create;
-//
-// std::vector<double> fls_agg;
-// std::vector<double> parquet_agg;
-//
-// for (int i = 0; i < 10; i++) {
-// 	duckdb::DuckDB bench_db(nullptr);
-// 	duckdb::Connection bench_conn(bench_db);
-//
-// 	bench_conn.Query("SET threads=1;");
-// 	// bench_conn.Query("PRAGMA force_compression='alp';");
-//
-// 	std::chrono::duration<double> elapsed_fls =
-// 	    profile_query(bench_conn, "CREATE VIEW fls_table AS SELECT * FROM read_fls('" +
-// 	                                  (base_dir / "fls" / benchmark).string() + "');");
-// 	std::chrono::duration<double> elapsed_parquet =
-// 	    profile_query(bench_conn, "CREATE VIEW parquet_table AS SELECT * FROM read_parquet('" +
-// 	                                  (base_dir / "parquet" / benchmark / "data.parquet").string() + "');");
-//
-// 	fls_create.push_back(elapsed_fls.count());
-// 	parquet_create.push_back(elapsed_parquet.count());
-//
-// 	std::chrono::duration<double> elapsed_agg_fls = profile_query(
-// 	    bench_conn,
-// 	    "SELECT AVG(COLUMN_0), AVG(COLUMN_1), AVG(COLUMN_2), AVG(COLUMN_3), AVG(COLUMN_4), "
-// 	    "AVG(COLUMN_5), AVG(COLUMN_6), AVG(COLUMN_7), AVG(COLUMN_8), AVG(COLUMN_9) FROM fls_table;");
-// 	std::chrono::duration<double> elapsed_agg_parquet = profile_query(
-// 	    bench_conn,
-// 	    "SELECT AVG(COLUMN_0), AVG(COLUMN_1), AVG(COLUMN_2), AVG(COLUMN_3), AVG(COLUMN_4), "
-// 	    "AVG(COLUMN_5), AVG(COLUMN_6), AVG(COLUMN_7), AVG(COLUMN_8), AVG(COLUMN_9) FROM fls_table;");
-//
-// 	fls_agg.push_back(elapsed_agg_fls.count());
-// 	parquet_agg.push_back(elapsed_agg_parquet.count());
-
-// std::cout << "FLS Create Timings: [";
-// for (const auto &f : fls_create) {
-// 	std::cout << " " << f << " ";
-// }
-// std::cout << "]\n";
-//
-// std::cout << "Parquet Create Timings: [";
-// for (const auto &pq : parquet_create) {
-// 	std::cout << " " << pq << " ";
-// }
-// std::cout << "]\n";
-//
-// std::cout << "FLS Create Average:"
-//           << std::accumulate(fls_create.begin(), fls_create.end(), 0.0) / fls_create.size() << '\n';
-// std::cout << "Parquet Create Average:"
-//           << std::accumulate(parquet_create.begin(), parquet_create.end(), 0.0) / parquet_create.size() << '\n';
-//
-// std::cout << "FLS Agg Timings: [";
-// for (const auto &f : fls_agg) {
-// 	std::cout << " " << f << " ";
-// }
-// std::cout << "]\n";
-//
-// std::cout << "Parquet Agg Timings: [";
-// for (const auto &pq : parquet_agg) {
-// 	std::cout << " " << pq << " ";
-// }
-// std::cout << "]\n";
-//
-// std::cout << "FLS Agg Average:" << std::accumulate(fls_agg.begin(), fls_agg.end(), 0.0) / fls_agg.size()
-//           << '\n';
-// std::cout << "Parquet Agg Average:"
-//           << std::accumulate(parquet_agg.begin(), parquet_agg.end(), 0.0) / parquet_agg.size() << '\n';
-
-// create_table(conn);
-//
-// auto result = conn.Query("SELECT * FROM fls_table");
-// if (result->HasError()) {
-// 	std::cerr << "Query Error: " << result->GetError() << std::endl;
-// 	return 1;
-// }
-//
-// for (size_t row = 0; row < result->RowCount(); row++) {
-// 	std::cout << "Row " << row << ": " << result->GetValue(0, row).ToString()
-// 			  << ", " << result->GetValue(1, row).ToString() << std::endl;
-// }
