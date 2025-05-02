@@ -82,13 +82,10 @@ static LogicalType TranslateType(const fastlanes::DataType type) {
 	case fastlanes::DataType::BYTE_ARRAY:
 		return LogicalType::BLOB;
 	case fastlanes::DataType::LIST:
-		// TODO
 		return LogicalType::LIST(LogicalType::SQLNULL);
 	case fastlanes::DataType::STRUCT:
-		// TODO
 		return LogicalType::STRUCT({});
 	case fastlanes::DataType::MAP:
-		// TODO
 		return LogicalType::MAP(LogicalType::SQLNULL, LogicalType::SQLNULL);
 	case fastlanes::DataType::FALLBACK:
 		return LogicalType::VARCHAR;
@@ -197,7 +194,6 @@ void decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_va
  *
  * fastlanes::copy(const PT* __restrict in_p, PT* __restrict out_p)
  *
- * TODO: Are we allocating enough memory to copy into the DataChunk from DuckDB?
  */
 struct material_visitor {
 	explicit material_visitor(const fastlanes::n_t vec_idx, Vector &target_col)
@@ -225,7 +221,6 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_opr<PT>> &opr) const {
 		// std::cout << "dec_alp_opr" << '\n';
-		// TODO: This should not have a decoded_arr as intermediary.
 		fastlanes::copy<PT>(opr->decoded_arr, FlatVector::GetData<PT>(target_col));
 	}
 	/**
@@ -234,7 +229,6 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_rd_opr<PT>> &opr) const {
 		// std::cout << "dec_alp_rd_opr" << '\n';
-		// TODO: This should not have a glue_arr as intermediary.
 		fastlanes::copy<PT>(opr->glue_arr, FlatVector::GetData<PT>(target_col));
 	}
 	/**
@@ -263,12 +257,10 @@ struct material_visitor {
 		    StringVector::AddString(target_col, reinterpret_cast<char *>(opr->bytes.data()), constant_value_size);
 	}
 
-	//////////// TODO //////////////
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::PhysicalExpr> &expr) const {
 		std::cout << "PhysicalExpr" << '\n';
 	}
-	//////////// TODO //////////////
 	void operator()(const fastlanes::sp<fastlanes::dec_struct_opr> &struct_expr) const {
 		std::cout << "dec_struct_opr" << '\n';
 	}
@@ -331,8 +323,6 @@ struct material_visitor {
 	 * Decode strings which are compressed using FSST (12-bit encoded).
 	 *
 	 * Allows up to 4096 entries.
-	 *
-	 * // TODO: Do we want to return a FlatVector or FSSTVector?
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_opr> &opr) const {
 		// std::cout << "dec_fsst12_opr" << '\n';
@@ -412,32 +402,26 @@ struct material_visitor {
 		// }
 	}
 	// DICT
-	//////////// TODO //////////////
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> &dict_expr) const {
 		std::cout << "dec_dict_opr<KEY_PT, INDEX_PT>" << '\n';
 	}
-	//////////// TODO //////////////
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> &opr) const {
 		std::cout << "dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>" << '\n';
 	}
-	//////////// TODO //////////////
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_dict_opr<INDEX_PT>> &opr) const {
 		std::cout << "dec_fsst_dict_opr<INDEX_PT>" << '\n';
 	}
-	//////////// TODO //////////////
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_dict_opr<INDEX_PT>> &opr) const {
 		std::cout << "dec_fsst12_dict_opr<INDEX_PT>" << '\n';
 	}
-	//////////// TODO //////////////
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> &opr) const {
 		std::cout << "dec_rle_map_opr<KEY_PT, INDEX_PT>" << '\n';
 	}
-	//////////// TODO //////////////
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>> &opr) const {
 		std::cout << "dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>" << '\n';
@@ -543,12 +527,10 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 
 	// The incoming path should be a full path to a file "/**/*.fls", verify if in this directory there exists
 	// a footer.json file, if there is none, this implies that the footer is baked in the file.
-	// TODO: Do we want the user to be able to supply a separate location for footer data?
 	dir_path = file.path.substr(0, file.path.find_last_of('/') + 1);
 	if (std::filesystem::exists(dir_path / fastlanes::TABLE_DESCRIPTOR_FILE_NAME)) {
 		table_reader = make_uniq<fastlanes::TableReader>(dir_path, conn);
 	} else {
-		// TODO: Implement
 		throw std::runtime_error("Baked-in footer not supported.");
 	}
 
@@ -622,7 +604,6 @@ unique_ptr<TableFunctionData> FastLanesMultiFileInfo::InitializeBindData(MultiFi
 
 void FastLanesMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &return_types,
                                         vector<string> &names, MultiFileBindData &bind_data) {
-	// TODO: Allow a user to supply a schema.
 	BaseFileReaderOptions options;
 	bind_data.reader_bind = bind_data.multi_file_reader->BindReader<FastLanesMultiFileInfo>(
 	    context, return_types, names, *bind_data.file_list, bind_data, options, bind_data.file_options);
@@ -631,7 +612,6 @@ void FastLanesMultiFileInfo::BindReader(ClientContext &context, vector<LogicalTy
 shared_ptr<BaseUnionData> FastLanesMultiFileInfo::GetUnionData(shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
 	std::cout << "Union Data" << '\n';
 
-	// TODO: Implement.
 	return nullptr;
 }
 
@@ -659,8 +639,7 @@ optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData &bind_da
 	if (expand_result == FileExpandResult::MULTIPLE_FILES) {
 		return optional_idx();
 	}
-	// TODO: We are using vectors inside a file here, make a setting where we can choose the granularity.
-	// rowgroup > vectors
+
 	const auto &bind_data = bind_data_p.bind_data->Cast<FastLanesReadBindData>();
 	return MaxValue(bind_data.initial_file_n_rowgroups, static_cast<idx_t>(1));
 }
@@ -716,8 +695,7 @@ bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &context, shared_pt
 
 	lstate.row_group_reader = reader.CreateRowGroupReader(lstate.cur_rowgroup);
 
-	// Consume the vector in the global state.
-	// TODO: Make vector batch size an option.
+	// Consume the rowgroup in the global state.
 	gstate.cur_rowgroup++;
 
 	return true;
@@ -726,7 +704,6 @@ bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &context, shared_pt
 void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader_p,
                                   GlobalTableFunctionState &global_state_p, LocalTableFunctionState &local_state_p,
                                   DataChunk &chunk) {
-	// TODO: Use DuckDB 2048 size, use min operator for possibly misaligned final vector.
 	// Also do not save this locally.
 	size_t batch_size = fastlanes::CFG::VEC_SZ;
 	const auto &global_state = global_state_p.Cast<FastLanesReadGlobalState>();
@@ -778,7 +755,6 @@ void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFile
                                                virtual_column_map_t &result) {
 }
 
-// TODO: The map currently is not initialised without projection.
 unique_ptr<BaseStatistics> FastLanesMultiFileInfo::GetStatistics(ClientContext &context, BaseFileReader &reader_p, const string &name) {
 	const auto &reader = reader_p.Cast<FastLanesReader>();
 	unique_ptr<BaseStatistics> stats;
@@ -808,8 +784,6 @@ unique_ptr<BaseStatistics> FastLanesMultiFileInfo::GetStatistics(ClientContext &
 void ReadFastLanes::Register(DatabaseInstance &db) {
 	MultiFileFunction<FastLanesMultiFileInfo> table_function("read_fls");
 	// table_function.statistics = MultiFileFunction<FastLanesMultiFileInfo>::MultiFileScanStats;
-
-	// TODO: support
 	// table_function.filter_pushdown = true;
 	// table_function.filter_prune = true;
 	// table_function.projection_pushdown = true;
