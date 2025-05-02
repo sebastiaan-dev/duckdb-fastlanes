@@ -14,8 +14,9 @@ std::unique_ptr<BMContext> MakeBMContext(const std::filesystem::path &path) {
 	auto ctx = std::make_unique<BMContext>();
 
 	// --- FastLanes ---
-	auto &fls_reader = ctx->conn.read_fls(path);
-	const auto &expressions = fls_reader.get_chunk(0);
+	auto &table_reader = ctx->conn.read_fls(path);
+	auto row_reader = table_reader.get_rowgroup_reader(0);
+	const auto &expressions = row_reader->get_chunk(0);
 	const auto expr = expressions[0];
 	expr->PointTo(0);
 	ctx->opr = std::get<fastlanes::sp<fastlanes::dec_fsst_opr>>(expr->operators.back());

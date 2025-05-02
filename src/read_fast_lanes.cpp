@@ -538,125 +538,25 @@ struct material_visitor {
 	Vector &target_col;
 };
 
-//-------------------------------------------------------------------
-// Local
-//-------------------------------------------------------------------
-// static unique_ptr<LocalTableFunctionState> LocalInitFn(ExecutionContext &context, TableFunctionInitInput &input,
-//                                                        GlobalTableFunctionState *global_state) {
-// 	auto local_state = make_uniq<FastLanesReadLocalState>();
-// 	auto &bind_data = input.bind_data->Cast<FastLanesReadBindData>();
-//
-// 	local_state->conn = fastlanes::Connection {};
-// 	local_state->reader = std::make_unique<fastlanes::Reader>(bind_data.directory, local_state->conn);
-// 	local_state->row_group = std::make_unique<fastlanes::Rowgroup>(local_state->reader->footer());
-// 	local_state->materializer = std::make_unique<fastlanes::Materializer>(*local_state->row_group);
-//
-// 	return local_state;
-// };
-
-//-------------------------------------------------------------------
-// Global
-//-------------------------------------------------------------------
-static unique_ptr<GlobalTableFunctionState> GlobalInitFn(ClientContext &context, TableFunctionInitInput &input) {
-	auto global_state = make_uniq<FastLanesReadGlobalState>();
-	auto &bind_data = input.bind_data->Cast<FastLanesReadBindData>();
-
-	// Verify that a Fastlanes vector fits in the output Vector of DuckDB
-	// TODO: DuckDB 2048
-	D_ASSERT(fastlanes::CFG::VEC_SZ <= 1024);
-	// Vector size should be a power of 2 to allow shift based multiplication.
-	D_ASSERT(powerof2(fastlanes::CFG::VEC_SZ));
-
-	global_state->vec_sz = fastlanes::CFG::VEC_SZ;
-	global_state->vec_sz_exp = std::log2(global_state->vec_sz);
-	global_state->n_vector = bind_data.n_vector;
-	global_state->cur_vector = 0;
-
-	return global_state;
-};
-
-//-------------------------------------------------------------------
-// Bind
-//-------------------------------------------------------------------
-// static unique_ptr<FunctionData> BindFn(ClientContext &context, TableFunctionBindInput &input,
-//                                        vector<LogicalType> &return_types, vector<string> &names) {
-// 	auto read_bind_data = make_uniq<FastLanesReadBindData>();
-// 	read_bind_data->directory = input.inputs[0].ToString();
-//
-// 	// Set up a connection to the file
-// 	fastlanes::Connection conn;
-// 	const fastlanes::Reader &fls_reader = conn.reset().read_fls(read_bind_data->directory);
-//
-// 	const auto footer = fls_reader.footer();
-// 	const auto &column_descriptors = footer.GetColumnDescriptors();
-// 	// Fill the data types and return types.
-// 	for (idx_t i = 0; i < column_descriptors.size(); ++i) {
-// 		return_types.push_back(TranslateType(column_descriptors[i].data_type));
-// 		names.push_back(column_descriptors[i].name);
-// 	}
-//
-// 	read_bind_data->n_vector = footer.GetNVectors();
-//
-// 	return read_bind_data;
-// };
-
-//-------------------------------------------------------------------
-// Table
-//-------------------------------------------------------------------
-// static void LoadFlsVector(FastLanesReadGlobalState &global_state, TableFunctionInput &data, DataChunk &output,
-//                           int16_t offset) {
-// 	const auto &local_state = data.local_state->Cast<FastLanesReadLocalState>();
-//
-// 	const auto &expressions = local_state.reader->get_chunk(global_state.cur_vector);
-// 	// ColumnCount is defined during the bind of the table function.
-// 	for (idx_t col_idx = 0; col_idx < output.ColumnCount(); col_idx++) {
-// 		auto &target_col = output.data[col_idx];
-// 		const auto expr = expressions[col_idx];
-//
-// 		expr->PointTo(global_state.cur_vector);
-// 		visit(material_visitor {global_state.cur_vector, target_col, global_state},
-// 		      expr->operators[expr->operators.size() - 1]);
-// 	}
-// }
-
-// static void TableFn(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-// 	auto &global_state = data.global_state->Cast<FastLanesReadGlobalState>();
-//
-// 	if (global_state.cur_vector < global_state.n_vector - 1) {
-// 		// TODO: Set cardinality to 2048 here
-// 		output.SetCardinality(1024);
-// 		LoadFlsVector(global_state, data, output, 0);
-// 		// ++global_state.cur_vector;
-// 		// LoadFlsVector(global_state, data, output, 1024);
-// 	} else if (global_state.cur_vector < global_state.n_vector) {
-// 		output.SetCardinality(1024);
-// 		LoadFlsVector(global_state, data, output, 0);
-// 	} else {
-// 		// Stop the stream of data, table function is no longer called.
-// 		output.SetCardinality(0);
-// 		return;
-// 	}
-//
-// 	// Go to the next vector in the row group
-// 	++global_state.cur_vector;
-// }
-
 FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move(file_p)) {
 	D_ASSERT(StringUtil::EndsWith(file.path, ".fls"));
 
 	// The incoming path should be a full path to a file "/**/*.fls", verify if in this directory there exists
 	// a footer.json file, if there is none, this implies that the footer is baked in the file.
 	// TODO: Do we want the user to be able to supply a separate location for footer data?
-	auto path = file.path.substr(0, file.path.find_last_of("/") + 1);
-	if (std::filesystem::exists(path + fastlanes::FOOTER_FILE_NAME)) {
-		reader = make_uniq<fastlanes::Reader>(path, conn);
+	dir_path = file.path.substr(0, file.path.find_last_of('/') + 1);
+	if (std::filesystem::exists(dir_path / fastlanes::TABLE_DESCRIPTOR_FILE_NAME)) {
+		table_reader = make_uniq<fastlanes::TableReader>(dir_path, conn);
 	} else {
 		// TODO: Implement
 		throw std::runtime_error("Baked-in footer not supported.");
 	}
 
+	fastlanes::RowgroupDescriptor rowgroup_descriptor = table_reader->get_file_metadata().m_rowgroup_descriptors[0];
+	auto column_descriptors = rowgroup_descriptor.GetColumnDescriptors();
+
 	// Configure the schema based on the data provided by the footer
-	for (auto &column_descriptor : reader->footer().GetColumnDescriptors()) {
+	for (auto &column_descriptor : column_descriptors) {
 		auto type = TranslateType(column_descriptor.data_type);
 		auto name = column_descriptor.name;
 
@@ -669,81 +569,38 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 FastLanesReader::~FastLanesReader() {
 }
 
-idx_t FastLanesReader::GetNVectors() const {
-	return reader->footer().GetNVectors();
+fastlanes::TableDescriptor &FastLanesReader::GetFileMetadata() const {
+	return table_reader->get_file_metadata();
 }
+
+
+idx_t FastLanesReader::GetNRowGroups() const {
+	return table_reader->get_n_rowgroups();
+}
+
+idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
+	const fastlanes::vector<fastlanes::RowgroupDescriptor>& descriptors =
+	    table_reader->get_file_metadata().m_rowgroup_descriptors;
+	D_ASSERT(row_group_idx < descriptors.size());
+
+	return descriptors[row_group_idx].GetNVectors();
+}
+
 
 idx_t FastLanesReader::GetNRows() const {
-	return reader->footer().GetNVectors() * fastlanes::CFG::VEC_SZ;
+	const fastlanes::TableDescriptor& table_descriptor = table_reader->get_file_metadata();
+
+	idx_t total_n_vectors = 0;
+	for (auto& row_group_descriptor : table_descriptor.m_rowgroup_descriptors) {
+		total_n_vectors += row_group_descriptor.GetNVectors();
+	}
+
+	return total_n_vectors * fastlanes::CFG::VEC_SZ;
 }
 
-std::vector<std::shared_ptr<fastlanes::PhysicalExpr>> FastLanesReader::GetChunk(idx_t vec_idx) const {
-	return reader->get_chunk(vec_idx);
+fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(const idx_t rowgroup_idx) {
+	return table_reader->get_rowgroup_reader(rowgroup_idx);
 }
-
-/**
- * Define all the required functions from the MultiFileFunction template class.
- *
- */
-struct FastLanesMultiFileInfo {
-	/* ---- MultiFileBind ---- */
-	static unique_ptr<BaseFileReaderOptions> InitializeOptions(ClientContext &context,
-	                                                           optional_ptr<TableFunctionInfo> info);
-	static bool ParseOption(ClientContext &context, const string &key, const Value &val, MultiFileOptions &file_options,
-	                        BaseFileReaderOptions &options);
-	/* ---- MultiFileBindInternal ---- */
-	/*!
-	 * Save user-provided options (currently none) and allocate FastLanesReadBindData (TableFunctionData) object.
-	 */
-	static unique_ptr<TableFunctionData> InitializeBindData(MultiFileBindData &multi_file_data,
-	                                                        unique_ptr<BaseFileReaderOptions> options);
-	static void BindReader(ClientContext &context, vector<LogicalType> &return_types, vector<string> &names,
-	                       MultiFileBindData &bind_data);
-	static shared_ptr<BaseUnionData> GetUnionData(shared_ptr<BaseFileReader> scan_p, idx_t file_idx);
-
-	static void FinalizeBindData(const MultiFileBindData &multi_file_data);
-	/* ---- MultiFileGetBindInfo ---- */
-	static void GetBindInfo(const TableFunctionData &bind_data, BindInfo &info);
-
-	/* ---- MultiInitGlobal ---- */
-	static unique_ptr<GlobalTableFunctionState>
-	InitializeGlobalState(ClientContext &context, MultiFileBindData &bind_data, MultiFileGlobalState &global_state);
-	static optional_idx MaxThreads(const MultiFileBindData &bind_data, const MultiFileGlobalState &global_state,
-	                               FileExpandResult expand_result);
-	/* ---- MultiInitLocal ---- */
-	static unique_ptr<LocalTableFunctionState> InitializeLocalState(ExecutionContext &, GlobalTableFunctionState &);
-
-	/* ---- MultiFileScan ---- */
-	static void Scan(ClientContext &context, BaseFileReader &reader, GlobalTableFunctionState &global_state,
-	                 LocalTableFunctionState &local_state, DataChunk &chunk);
-
-	/* --- TryOpenNextFile ---- */
-	static shared_ptr<BaseFileReader> CreateReader(ClientContext &context, GlobalTableFunctionState &gstate,
-	                                               BaseUnionData &union_data, const MultiFileBindData &bind_data);
-	static shared_ptr<BaseFileReader> CreateReader(ClientContext &context, GlobalTableFunctionState &gstate,
-	                                               const OpenFileInfo &file, idx_t file_idx,
-	                                               const MultiFileBindData &bind_data);
-	static shared_ptr<BaseFileReader> CreateReader(ClientContext &context, const OpenFileInfo &file,
-	                                               const BaseFileReaderOptions &options,
-	                                               const MultiFileOptions &file_options);
-	static void FinalizeReader(ClientContext &context, BaseFileReader &reader, GlobalTableFunctionState &);
-	/* ---- TryInitializeNextBatch ---- */
-	static void FinishReading(ClientContext &context, GlobalTableFunctionState &global_state,
-	                          LocalTableFunctionState &local_state);
-	static bool TryInitializeScan(ClientContext &context, shared_ptr<BaseFileReader> &reader,
-	                              GlobalTableFunctionState &gstate, LocalTableFunctionState &lstate);
-	static void FinishFile(ClientContext &context, GlobalTableFunctionState &global_state, BaseFileReader &reader);
-
-	/* ---- MultiFileCardinality ---- */
-	/*!
-	 * Estimate the cardinality of the to-be-read files, the estimate is based on the first file.
-	 */
-	static unique_ptr<NodeStatistics> GetCardinality(const MultiFileBindData &bind_data_p, idx_t file_count);
-	/* ---- MultiFileProgress ---- */
-	static double GetProgressInFile(ClientContext &context, const BaseFileReader &reader);
-	/* ---- MultiFileGetVirtualColumns ---- */
-	static void GetVirtualColumns(ClientContext &context, MultiFileBindData &bind_data, virtual_column_map_t &result);
-};
 
 unique_ptr<BaseFileReaderOptions> FastLanesMultiFileInfo::InitializeOptions(ClientContext &context,
                                                                             optional_ptr<TableFunctionInfo> info) {
@@ -786,7 +643,7 @@ void FastLanesMultiFileInfo::FinalizeBindData(const MultiFileBindData &multi_fil
 
 		const auto &initial_reader = multi_file_data.initial_reader->Cast<FastLanesReader>();
 		bind_data.initial_file_cardinality = initial_reader.GetNRows();
-		bind_data.initial_file_n_vectors = initial_reader.GetNVectors();
+		bind_data.initial_file_n_rowgroups = initial_reader.GetNRowGroups();
 
 		return;
 	}
@@ -805,8 +662,7 @@ optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData &bind_da
 	// TODO: We are using vectors inside a file here, make a setting where we can choose the granularity.
 	// rowgroup > vectors
 	const auto &bind_data = bind_data_p.bind_data->Cast<FastLanesReadBindData>();
-	// bind_data.initial_file_n_vectors,
-	return MaxValue(static_cast<idx_t>(0), static_cast<idx_t>(1));
+	return MaxValue(bind_data.initial_file_n_rowgroups, static_cast<idx_t>(1));
 }
 
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &context,
@@ -822,6 +678,7 @@ shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &c
                                                                 const MultiFileBindData &bind_data) {
 	return make_shared_ptr<FastLanesReader>(file);
 }
+
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &context, const OpenFileInfo &file,
                                                                 const BaseFileReaderOptions &options,
                                                                 const MultiFileOptions &file_options) {
@@ -850,16 +707,18 @@ bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &context, shared_pt
 	auto &reader = reader_p->Cast<FastLanesReader>();
 
 	// Check if there are noo more vectors left to scan.
-	if (gstate.cur_row_group) {
+	if (gstate.cur_rowgroup >= reader.GetNRowGroups()) {
 		return false;
 	}
 	// Prepare the local state of the current thread by informing its processing responsibilities.
 	lstate.cur_vector = 0;
-	lstate.to_vector = 64;
+	lstate.cur_rowgroup = gstate.cur_rowgroup;
+
+	lstate.row_group_reader = reader.CreateRowGroupReader(lstate.cur_rowgroup);
+
 	// Consume the vector in the global state.
 	// TODO: Make vector batch size an option.
-	//gstate.cur_vector++;
-	gstate.cur_row_group++;
+	gstate.cur_rowgroup++;
 
 	return true;
 }
@@ -874,12 +733,11 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
 	const auto &reader = reader_p.Cast<FastLanesReader>();
 
-	if (local_state.cur_vector > local_state.to_vector - 1) {
-		chunk.SetCardinality(0);
+	if (local_state.cur_vector >= reader.GetNVectors(local_state.cur_rowgroup)) {
 		return;
 	}
 
-	const auto &expressions = reader.GetChunk(local_state.cur_vector);
+	const auto &expressions = local_state.row_group_reader->get_chunk(local_state.cur_vector);
 	// ColumnCount is defined during the bind of the table function.
 	for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
 		auto &target_col = chunk.data[col_idx];
@@ -902,8 +760,7 @@ void FastLanesMultiFileInfo::FinishFile(ClientContext &context, GlobalTableFunct
 	auto &g_state = global_state_p.Cast<FastLanesReadGlobalState>();
 
 	// Reset progression trackers of the current file.
-	g_state.cur_vector = 0;
-	g_state.cur_row_group = 0;
+	g_state.cur_rowgroup = 0;
 }
 
 unique_ptr<NodeStatistics> FastLanesMultiFileInfo::GetCardinality(const MultiFileBindData &bind_data_p,
@@ -921,11 +778,37 @@ void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFile
                                                virtual_column_map_t &result) {
 }
 
+// TODO: The map currently is not initialised without projection.
+unique_ptr<BaseStatistics> FastLanesMultiFileInfo::GetStatistics(ClientContext &context, BaseFileReader &reader_p, const string &name) {
+	const auto &reader = reader_p.Cast<FastLanesReader>();
+	unique_ptr<BaseStatistics> stats;
+
+	const fastlanes::TableDescriptor& table_descriptor = reader.GetFileMetadata();
+	for (idx_t row_group_idx = 0; row_group_idx < table_descriptor.m_rowgroup_descriptors.size(); row_group_idx++) {
+		auto &row_group_descriptor = table_descriptor.m_rowgroup_descriptors[row_group_idx];
+		auto &column_descriptors = row_group_descriptor.GetColumnDescriptors();
+		auto column_idx = row_group_descriptor.LookUp(name);
+		auto &column_descriptor = column_descriptors[column_idx];
+
+
+		if (column_descriptor.n_null > 0) {
+			stats->SetHasNull();
+		} else {
+			stats->SetHasNoNull();
+		}
+	}
+
+	return stats;
+}
+
+
 //-------------------------------------------------------------------
 // Register
 //-------------------------------------------------------------------
 void ReadFastLanes::Register(DatabaseInstance &db) {
 	MultiFileFunction<FastLanesMultiFileInfo> table_function("read_fls");
+	// table_function.statistics = MultiFileFunction<FastLanesMultiFileInfo>::MultiFileScanStats;
+
 	// TODO: support
 	// table_function.filter_pushdown = true;
 	// table_function.filter_prune = true;

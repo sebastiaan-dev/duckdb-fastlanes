@@ -1,0 +1,16 @@
+# name: test/sql/dec_ffst_opr_str_load.test
+# description: Test loading FSST
+# group: [fls]
+
+require parquet
+
+query III
+Set threads=8;
+CREATE VIEW parquet_table AS SELECT * FROM read_parquet("/Users/sebastiaan/Documents/university/thesis/duckdb-fastlanes/benchmarks/data/parquet/dec_alp_opr_dbl_20_1280_*/*.parquet");
+SELECT COUNT(*), SUM(column00), AVG(column00) FROM parquet_table;
+SELECT COUNT(*), SUM(column00), AVG(column00) FROM parquet_table;
+SELECT COUNT(*), SUM(column00), AVG(column00) FROM parquet_table;
+SELECT COUNT(*), SUM(column00), AVG(column00) FROM parquet_table;
+SELECT COUNT(*), SUM(column00), AVG(column00) FROM parquet_table;
+----
+131072	65390.82800000039	0.4988924255371123

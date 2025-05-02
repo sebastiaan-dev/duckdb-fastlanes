@@ -6,17 +6,23 @@
 #include <regex>
 
 static bool verify_fls_data(const std::filesystem::path &dest_dir) {
+	std::cout << "Verifying: ";
+
 	fastlanes::Connection conn;
 	// Verify we can load the generated file
-	fastlanes::Reader &reader = conn.reset().read_fls(dest_dir);
+	fastlanes::TableReader &table_reader = conn.reset().read_fls(dest_dir);
+	for (idx_t group = 0; group < table_reader.get_n_rowgroups(); group++) {
+		auto row_reader = table_reader.get_rowgroup_reader(group);
+		auto row_descriptor = row_reader->get_descriptor();
 
-	std::cout << "Verifying: ";
-	for (int i = 0; i < reader.footer().GetNVectors(); i++) {
-		if (reader.get_chunk(i).size() != reader.footer().GetColumnDescriptors().size()) {
-			return false;
+		for (idx_t vector = 0; vector < row_descriptor.GetNVectors(); vector++) {
+			if (row_reader->get_chunk(vector).size() != row_descriptor.GetColumnDescriptors().size()) {
+				return false;
+			}
 		}
+
+		row_reader->materialize();
 	}
-	reader.materialize();
 
 	return true;
 }
@@ -35,9 +41,9 @@ static void generate_fls_data(const std::filesystem::path &base_dir, const std::
 
 	try {
 		if (schema.empty()) {
-			conn.reset().read(source_dir);
+			conn.reset().read_csv(source_dir);
 		} else {
-			conn.reset().read(source_dir).force_schema(schema);
+			conn.reset().read_csv(source_dir).force_schema(schema);
 		}
 	} catch (const std::exception &e) {
 		std::cerr << "Failed to read from: " << source_dir << "\n";
@@ -106,7 +112,7 @@ void generate_data(const std::filesystem::path &base_dir) {
 		int cols = std::stoi(match[2].str());
 		std::vector schema(cols, fastlanes::OperatorToken::EXP_FSST_DELTA);
 
-		generate_fls_data(base_dir, entry.path().filename(), schema);
+		generate_fls_data(base_dir, entry.path().filename(), {});
 		generate_parquet_data(conn, base_dir, entry.path().filename());
 	}
 
