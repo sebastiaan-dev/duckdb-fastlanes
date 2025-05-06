@@ -7,15 +7,9 @@ namespace duckdb {
 FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move(file_p)) {
 	D_ASSERT(StringUtil::EndsWith(file.path, ".fls"));
 
-	// The incoming path should be a full path to a file "/**/*.fls", verify if in this directory there exists
-	// a footer.json file, if there is none, this implies that the footer is baked in the file.
-	dir_path = file.path.substr(0, file.path.find_last_of('/') + 1);
-	if (std::filesystem::exists(dir_path / fastlanes::TABLE_DESCRIPTOR_FILE_NAME)) {
-		table_reader = make_uniq<fastlanes::TableReader>(dir_path, conn);
-	} else {
-		throw std::runtime_error("Baked-in footer not supported.");
-	}
-
+	std::filesystem::path full_path = file.path;
+	dir_path = full_path.parent_path();
+	table_reader = make_uniq<fastlanes::TableReader>(dir_path, conn);
 	fastlanes::RowgroupDescriptor rowgroup_descriptor = table_reader->get_file_metadata().m_rowgroup_descriptors[0];
 	auto column_descriptors = rowgroup_descriptor.GetColumnDescriptors();
 
