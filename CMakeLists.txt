@@ -19,7 +19,13 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/fast_lanes_extension.cpp src/read_fast_lanes.cpp)
+set(EXTENSION_SOURCES src/fast_lanes_extension.cpp
+        src/read_fast_lanes.cpp
+        src/reader/fast_lanes_multi_file_info.cpp
+        src/reader/fast_lanes_reader.cpp
+        src/reader/translation_utils.cpp
+        src/reader/materializer.cpp
+)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
