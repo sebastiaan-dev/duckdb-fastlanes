@@ -135,28 +135,38 @@ bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &context, shared_pt
 void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader_p,
                                   GlobalTableFunctionState &global_state_p, LocalTableFunctionState &local_state_p,
                                   DataChunk &chunk) {
-	// Also do not save this locally.
-	size_t batch_size = fastlanes::CFG::VEC_SZ;
-	const auto &global_state = global_state_p.Cast<FastLanesReadGlobalState>();
+	D_ASSERT(fastlanes::CFG::VEC_SZ * 2 == STANDARD_VECTOR_SIZE);
+
 	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
 	const auto &reader = reader_p.Cast<FastLanesReader>();
+	const auto cur_vec = local_state.cur_vector;
+	const auto n_vectors = reader.GetNVectors(local_state.cur_rowgroup);
 
-	if (local_state.cur_vector >= reader.GetNVectors(local_state.cur_rowgroup)) {
+	if (cur_vec >= n_vectors) {
 		return;
 	}
 
-	const auto &expressions = local_state.row_group_reader->get_chunk(local_state.cur_vector);
-	// ColumnCount is defined during the bind of the table function.
-	for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
-		auto &target_col = chunk.data[col_idx];
-		const auto expr = expressions[col_idx];
-
-		expr->PointTo(local_state.cur_vector);
-		std::visit(material_visitor {local_state.cur_vector, target_col}, expr->operators[expr->operators.size() - 1]);
+	idx_t batch_size = 1;
+	if (cur_vec + 1 < n_vectors) {
+		batch_size = 2;
 	}
 
-	chunk.SetCardinality(batch_size);
-	local_state.cur_vector++;
+	for (idx_t batch_idx = 0; batch_idx < batch_size; batch_idx++) {
+		const idx_t vector_idx = cur_vec + batch_idx;
+		const auto &expressions = local_state.row_group_reader->get_chunk(vector_idx);
+
+		// ColumnCount is defined during the bind of the table function.
+		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
+			auto &target_col = chunk.data[col_idx];
+			const auto expr = expressions[col_idx];
+
+			expr->PointTo(vector_idx);
+			std::visit(material_visitor {vector_idx, target_col}, expr->operators[expr->operators.size() - 1]);
+		}
+	}
+
+	chunk.SetCardinality(fastlanes::CFG::VEC_SZ * batch_size);
+	local_state.cur_vector += batch_size;
 }
 
 void FastLanesMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFunctionState &global_state,
