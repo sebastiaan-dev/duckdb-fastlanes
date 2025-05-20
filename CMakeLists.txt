@@ -36,32 +36,32 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 ##-----------------------------------------------------------------------------------------------------------------------
 ## FLS :
-#include(FetchContent)
+include(FetchContent)
 #include(CMakePrintHelpers)
 ###
-#option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
+option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
 #### TODO: enable
-#option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
+option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 ###
 ###
 #### Definitions: ---------------------------------------------------------------------------------------------------------
-#add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 ##
 ### FastLanes: -----------------------------------------------------------------------------------------------------------
 #message("---------------------------------------------------------------------------------------------------------")
 #message("-- FLS Extension: Build FastLanes ")
 #
-#FetchContent_Declare(
-#        fls_repo
-#        GIT_REPOSITORY https://github.com/cwida/FastLanes.git
-#        GIT_TAG release_v0.1
-#)
+FetchContent_Declare(
+        fls_repo
+        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
+        GIT_TAG dev
+)
 #
-#FetchContent_MakeAvailable(fls_repo)
-#include_directories(${fls_repo_SOURCE_DIR}/include)
+FetchContent_MakeAvailable(fls_repo)
+include_directories(${fls_repo_SOURCE_DIR}/include)
 #
-#target_link_libraries(${EXTENSION_NAME} FastLanes)
-#target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
+target_link_libraries(${EXTENSION_NAME} FastLanes)
+target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 
 ##-----------------------------------------------------------------------------------------------------------------------
 
@@ -69,27 +69,27 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 # Use a local instance of FastLanes
 #
 # Adjust the path below to where your local FastLanes source is located.
-include(CMakePrintHelpers)
-set(FASTLANES_DIR "/Users/sebastiaan/Documents/university/thesis/sebastiaan-fastlanes")
+#include(CMakePrintHelpers)
+#set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
 ### TODO: enable
-option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
+#option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
-add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+#add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-message("---------------------------------------------------------------------------------------------------------")
-message("-- FLS Extension: Build FastLanes ")
+#message("---------------------------------------------------------------------------------------------------------")
+#message("-- FLS Extension: Build FastLanes ")
 
 # Add FastLanes as a subdirectory.
 # This will build FastLanes as part of your project.
-add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
+#add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
 
 # Include FastLanes headers.
-include_directories(${FASTLANES_DIR}/include)
+#include_directories(${FASTLANES_DIR}/include)
 
 # Link your extension with the local FastLanes library target.
 # (Make sure the target name "FastLanes" matches the one defined in the FastLanes CMakeLists.txt.)
-target_link_libraries(${EXTENSION_NAME} FastLanes)
-target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
+#target_link_libraries(${EXTENSION_NAME} FastLanes)
+#target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 
 #---------------------------------------------------
 

@@ -1,0 +1,6 @@
+name	run	timing
+benchmark/tpch/q03.benchmark	1	0.161320
+benchmark/tpch/q03.benchmark	2	0.161060
+benchmark/tpch/q03.benchmark	3	0.140638
+benchmark/tpch/q03.benchmark	4	0.151854
+benchmark/tpch/q03.benchmark	5	0.160713
