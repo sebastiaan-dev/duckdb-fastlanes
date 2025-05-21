@@ -46,7 +46,7 @@ idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
 
 
 idx_t FastLanesReader::GetNRows() const {
-	const fastlanes::TableDescriptor& table_descriptor = table_reader->get_file_metadata();
+	const fastlanes::TableDescriptorT& table_descriptor = table_reader->get_file_metadata();
 
 	idx_t total_n_vectors = 0;
 	for (auto& row_group_descriptor : table_descriptor.m_rowgroup_descriptors) {

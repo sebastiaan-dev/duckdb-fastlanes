@@ -1,0 +1,13 @@
+Benchmark to run could not be found.
+Usage: benchmark_runner
+              --list                 Show a list of all benchmarks
+              --profile              Prints the query profile information
+              --detailed-profile     Prints detailed query profile information
+              --threads=n            Sets the amount of threads to use during execution (default: hardware concurrency)
+              --out=[file]           Move benchmark output to file
+              --log=[file]           Move log output to file
+              --info                 Prints info about the benchmark
+              --query                Prints query of the benchmark
+              --root-dir             Sets the root directory for where to store temp data and look for the 'benchmarks' directory
+              --disable-timeout      Disables killing the run after a certain amount of time has passed (30 seconds by default)
+              [name_pattern]         Run only the benchmark which names match the specified name pattern, e.g., DS.* for TPC-DS benchmarks

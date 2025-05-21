@@ -20,7 +20,7 @@ public:
 		return "FastLanes";
 	}
 
-	fastlanes::TableDescriptor& GetFileMetadata() const;
+	fastlanes::TableDescriptorT& GetFileMetadata() const;
 	idx_t GetNRowGroups() const;
 	idx_t GetNRows() const;
 	idx_t GetNVectors(idx_t row_group_idx) const;

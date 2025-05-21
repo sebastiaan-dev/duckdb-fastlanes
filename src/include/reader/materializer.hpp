@@ -38,7 +38,8 @@ union test {
 //-------------------------------------------------------------------
 // Materialize
 //-------------------------------------------------------------------
-fastlanes::n_t find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::n_t size, fastlanes::n_t range_index) {
+fastlanes::n_t t_find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::n_t size,
+                                  fastlanes::n_t range_index) {
 	fastlanes::n_t target_start = range_index * 1024;
 	fastlanes::n_t current_pos = 0;
 
@@ -54,9 +55,9 @@ fastlanes::n_t find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::
 }
 
 template <typename PT>
-void decode_rle_range(const fastlanes::len_t *rle_lengths, const PT *rle_values, fastlanes::n_t size,
-                      fastlanes::n_t range_index, PT *decoded_arr) {
-	fastlanes::n_t start_rle_index = find_rle_segment(rle_lengths, size, range_index);
+void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const PT *rle_values, fastlanes::n_t size,
+                        fastlanes::n_t range_index, PT *decoded_arr) {
+	fastlanes::n_t start_rle_index = t_find_rle_segment(rle_lengths, size, range_index);
 
 	fastlanes::n_t needed = 1024;
 	fastlanes::n_t current_index = start_rle_index;
@@ -82,11 +83,11 @@ void decode_rle_range(const fastlanes::len_t *rle_lengths, const PT *rle_values,
 	}
 }
 
-void decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_value_bytes,
-                      const fastlanes::ofs_t *rle_value_offsets, fastlanes::n_t size, fastlanes::n_t range_index,
-                      Vector &target_col, string_t *target) {
+void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_value_bytes,
+                        const fastlanes::ofs_t *rle_value_offsets, fastlanes::n_t size, fastlanes::n_t range_index,
+                        Vector &target_col, string_t *target) {
 
-	fastlanes::n_t start_rle_index = find_rle_segment(rle_lengths, size, range_index);
+	fastlanes::n_t start_rle_index = t_find_rle_segment(rle_lengths, size, range_index);
 
 	fastlanes::n_t needed = 1024;
 	fastlanes::n_t current_index = start_rle_index;
@@ -397,7 +398,7 @@ struct material_visitor {
 
 		const auto size = opr->lengths_segment.data_span.size() / sizeof(fastlanes::len_t);
 
-		decode_rle_range(length, values, size, vec_idx, target);
+		t_decode_rle_range(length, values, size, vec_idx, target);
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>> &opr) const {
 		// std::cout << "dec_cross_rle_opr<fastlanes::fls_string_t>" << '\n';
@@ -410,7 +411,7 @@ struct material_visitor {
 
 		const auto size = opr->lengths_segment.data_span.size() / sizeof(fastlanes::len_t);
 
-		decode_rle_range(length, values_bytes, offsets, size, vec_idx, target_col, target);
+		t_decode_rle_range(length, values_bytes, offsets, size, vec_idx, target_col, target);
 	}
 
 	void operator()(const auto &opr) const {
@@ -420,4 +421,4 @@ struct material_visitor {
 	fastlanes::n_t vec_idx;
 	Vector &target_col;
 };
-}
+} // namespace duckdb
