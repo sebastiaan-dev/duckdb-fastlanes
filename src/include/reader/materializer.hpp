@@ -10,6 +10,7 @@
 #include <fls/expression/fsst12_expression.hpp>
 #include <fls/primitive/copy/fls_copy.hpp>
 #include <duckdb/storage/segment/uncompressed.hpp>
+#include "fls/expression/dict_expression.hpp"
 
 namespace duckdb {
 
@@ -38,7 +39,7 @@ union test {
 //-------------------------------------------------------------------
 // Materialize
 //-------------------------------------------------------------------
-fastlanes::n_t t_find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::n_t size,
+inline fastlanes::n_t t_find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::n_t size,
                                   fastlanes::n_t range_index) {
 	fastlanes::n_t target_start = range_index * 1024;
 	fastlanes::n_t current_pos = 0;
@@ -83,7 +84,7 @@ void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const PT *rle_value
 	}
 }
 
-void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_value_bytes,
+inline void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_value_bytes,
                         const fastlanes::ofs_t *rle_value_offsets, fastlanes::n_t size, fastlanes::n_t range_index,
                         Vector &target_col, string_t *target) {
 
@@ -137,8 +138,8 @@ void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_
  *
  */
 struct material_visitor {
-	explicit material_visitor(const fastlanes::n_t vec_idx, Vector &target_col)
-	    : vec_idx(vec_idx), target_col(target_col) {};
+	explicit material_visitor(const fastlanes::n_t vec_idx, const idx_t batch_idx, Vector &target_col)
+	    : vec_idx(vec_idx), batch_idx(batch_idx), target_col(target_col) {};
 
 	/**
 	 * Unpack uncompressed values (no decoding required).
@@ -227,6 +228,7 @@ struct material_visitor {
 	 * Allows up to 256 entries.
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_opr> &opr) const {
+		// std::cout << "dec_fsst_opr" << '\n';
 		const auto target_ptr = FlatVector::GetData<string_t>(target_col);
 		auto buffer = make_buffer<VectorStringBuffer>();
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst_bytes_segment_view.data);
@@ -302,6 +304,26 @@ struct material_visitor {
 		target_col.SetAuxiliary(buffer);
 	}
 	// DICT
+	// D_ASSERT(start % BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE == 0);
+	// D_ASSERT(scan_count == STANDARD_VECTOR_SIZE);
+	// D_ASSERT(result_offset == 0);
+	//
+	// idx_t decompress_count = BitpackingPrimitives::RoundUpToAlgorithmGroupSize(scan_count);
+	//
+	// // Create a selection vector of sufficient size if we don't already have one.
+	// if (!sel_vec || sel_vec_size < decompress_count) {
+	// 	sel_vec_size = decompress_count;
+	// 	sel_vec = make_buffer<SelectionVector>(decompress_count);
+	// }
+	//
+	// // Scanning 2048 values, emitting a dict vector
+	// data_ptr_t dst = data_ptr_cast(sel_vec->data());
+	// data_ptr_t src = data_ptr_cast(&base_data[(start * current_width) / 8]);
+	//
+	// BitpackingPrimitives::UnPackBuffer<sel_t>(dst, src, scan_count, current_width);
+	//
+	// result.Dictionary(*(dictionary), dictionary_size, *sel_vec, scan_count);
+	// DictionaryVector::SetDictionaryId(result, to_string(CastPointerToValue(&segment)));
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> &dict_expr) const {
 		// std::cout << "dec_dict_opr<KEY_PT, INDEX_PT>" << '\n';
@@ -419,6 +441,7 @@ struct material_visitor {
 	}
 
 	fastlanes::n_t vec_idx;
+	idx_t batch_idx;
 	Vector &target_col;
 };
 } // namespace duckdb
