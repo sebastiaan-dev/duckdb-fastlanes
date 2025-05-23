@@ -33,7 +33,7 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 FastLanesReader::~FastLanesReader() {
 }
 
-fastlanes::TableDescriptorT& FastLanesReader::GetFileMetadata() const {
+const fastlanes::TableDescriptorT& FastLanesReader::GetFileMetadata() const {
 	return table_reader->get_file_metadata();
 }
 
