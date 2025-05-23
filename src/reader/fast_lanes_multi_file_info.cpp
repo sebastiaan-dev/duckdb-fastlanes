@@ -161,7 +161,7 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);
-			std::visit(material_visitor {vector_idx, target_col}, expr->operators[expr->operators.size() - 1]);
+			std::visit(material_visitor {vector_idx, batch_idx, target_col}, expr->operators[expr->operators.size() - 1]);
 		}
 	}
 
@@ -201,21 +201,21 @@ unique_ptr<BaseStatistics> FastLanesMultiFileInfo::GetStatistics(ClientContext &
 	const auto &reader = reader_p.Cast<FastLanesReader>();
 	unique_ptr<BaseStatistics> stats;
 
-	const fastlanes::TableDescriptor &table_descriptor = reader.GetFileMetadata();
+	const fastlanes::TableDescriptorT table_descriptor = reader.GetFileMetadata();
 	for (idx_t row_group_idx = 0; row_group_idx < table_descriptor.m_rowgroup_descriptors.size(); row_group_idx++) {
 		auto &row_group_descriptor = table_descriptor.m_rowgroup_descriptors[row_group_idx];
-		auto &column_descriptors = row_group_descriptor.GetColumnDescriptors();
-		auto column_idx = row_group_descriptor.LookUp(name);
-		auto &column_descriptor = column_descriptors[column_idx];
+		auto &column_descriptors = row_group_descriptor->m_column_descriptors;
+		// auto column_idx = row_group_descriptor.LookUp(name);
+		// auto &column_descriptor = column_descriptors[column_idx];
 
-		if (column_descriptor.n_null > 0) {
-			stats->SetHasNull();
-		} else {
-			stats->SetHasNoNull();
-		}
+		// if (column_descriptor.n_null > 0) {
+		// 	stats->SetHasNull();
+		// } else {
+		// 	stats->SetHasNoNull();
+		// }
 	}
 
-	return stats;
+	return nullptr;
 }
 
 } // namespace duckdb
