@@ -12,7 +12,7 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 	std::filesystem::path full_path = file.path;
 	table_reader = make_uniq<fastlanes::TableReader>(full_path, conn);
 
-	auto table_metadata = table_reader->get_file_metadata();
+	const auto table_metadata = table_reader->get_file_metadata();
 	if (table_metadata.m_rowgroup_descriptors.empty()) {
 		throw std::runtime_error("FastLanesReader: no row-groups found in file \"" + file.path + "\"");
 	}
@@ -43,7 +43,7 @@ idx_t FastLanesReader::GetNRowGroups() const {
 }
 
 idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
-	fastlanes::TableDescriptorT& table = table_reader->get_file_metadata();
+	const fastlanes::TableDescriptorT& table = table_reader->get_file_metadata();
 	auto& row_descriptors = table.m_rowgroup_descriptors;
 
 	D_ASSERT(row_group_idx < row_descriptors.size());
