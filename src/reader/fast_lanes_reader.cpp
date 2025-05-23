@@ -11,7 +11,13 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 
 	std::filesystem::path full_path = file.path;
 	table_reader = make_uniq<fastlanes::TableReader>(full_path, conn);
-	auto& column_descriptors = table_reader->get_file_metadata().m_rowgroup_descriptors[0]->m_column_descriptors;
+
+	auto table_metadata = table_reader->get_file_metadata();
+	if (table_metadata.m_rowgroup_descriptors.empty()) {
+		throw std::runtime_error("FastLanesReader: no row-groups found in file \"" + file.path + "\"");
+	}
+
+	auto& column_descriptors = table_metadata.m_rowgroup_descriptors[0]->m_column_descriptors;
 
 	// Configure the schema based on the data provided by the footer
 	for (auto &column_descriptor : column_descriptors) {
