@@ -1,11 +1,6 @@
 #pragma once
 
-#include "duckdb/common/multi_file/base_file_reader.hpp"
-#include "duckdb/common/multi_file/multi_file_function.hpp"
-
 #include <duckdb/main/database.hpp>
-#include <fls/connection.hpp>
-#include <fls/encoder/materializer.hpp>
 
 namespace duckdb {
 
@@ -26,6 +21,5 @@ public:
 	 * @param db The currently running DuckDB database.
 	 */
 	static void Register(DatabaseInstance &db);
-	static TableFunction GetFunction();
 };
 } // namespace duckdb

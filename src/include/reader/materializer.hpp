@@ -13,14 +13,18 @@
 #include "fls/expression/dict_expression.hpp"
 #include "fls/expression/rle_expression.hpp"
 #include "zstd/common/debug.h"
+#include "fls/expression/transpose_operator.hpp"
 
 #ifndef NDEBUG
 #include <iostream>
-#  define DPRINT(x) \
-do { std::cerr << x << std::endl; } while (0)
+#define DPRINT(x)                                                                                                      \
+	do {                                                                                                               \
+		std::cerr << x << '\n';                                                                                   \
+	} while (0)
 #else
-#  define DPRINT(x) \
-do { } while (0)
+#define DPRINT(x)                                                                                                      \
+	do {                                                                                                               \
+	} while (0)
 #endif
 
 namespace duckdb {
@@ -51,7 +55,7 @@ union test {
 // Materialize
 //-------------------------------------------------------------------
 inline fastlanes::n_t t_find_rle_segment(const fastlanes::len_t *rle_lengths, fastlanes::n_t size,
-                                  fastlanes::n_t range_index) {
+                                         fastlanes::n_t range_index) {
 	fastlanes::n_t target_start = range_index * 1024;
 	fastlanes::n_t current_pos = 0;
 
@@ -96,8 +100,8 @@ void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const PT *rle_value
 }
 
 inline void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_t *rle_value_bytes,
-                        const fastlanes::ofs_t *rle_value_offsets, fastlanes::n_t size, fastlanes::n_t range_index,
-                        Vector &target_col, string_t *target) {
+                               const fastlanes::ofs_t *rle_value_offsets, fastlanes::n_t size,
+                               fastlanes::n_t range_index, Vector &target_col, string_t *target) {
 
 	fastlanes::n_t start_rle_index = t_find_rle_segment(rle_lengths, size, range_index);
 
@@ -149,8 +153,8 @@ inline void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_
  *
  */
 struct material_visitor {
-	explicit material_visitor(const fastlanes::n_t vec_idx, const idx_t batch_idx, Vector &target_col)
-	    : vec_idx(vec_idx), batch_idx(batch_idx), target_col(target_col) {};
+	explicit material_visitor(const fastlanes::n_t vec_idx, const idx_t offset, Vector &target_col)
+	    : vec_idx(vec_idx), offset(offset), target_col(target_col) {};
 
 	/**
 	 * Unpack uncompressed values (no decoding required).
@@ -319,10 +323,9 @@ struct material_visitor {
 		DPRINT("dict_opr<KEY_PT, INDEX_PT>");
 		const auto target_ptr = FlatVector::GetData<KEY_PT>(target_col);
 
-		const auto* key_p   = dict_expr->Keys();
-		const auto* index_p = dict_expr->Index();
+		const auto *key_p = dict_expr->Keys();
+		const auto *index_p = dict_expr->Index();
 
-		const fastlanes::n_t offset = batch_idx * fastlanes::CFG::VEC_SZ;
 		for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
 			target_ptr[idx + offset] = key_p[index_p[idx]];
 		}
@@ -343,11 +346,12 @@ struct material_visitor {
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> &opr) const {
 		DPRINT("rle_map_opr<KEY_PT, INDEX_PT>");
 		const auto target_ptr = FlatVector::GetData<KEY_PT>(target_col);
-		static_assert(!std::is_same_v<KEY_PT, fastlanes::fls_string_t>, "Generic Decode logic cannot handle fls_string_t!");
+		static_assert(!std::is_same_v<KEY_PT, fastlanes::fls_string_t>,
+		              "Generic Decode logic cannot handle fls_string_t!");
 		auto *rle_vals = reinterpret_cast<KEY_PT *>(opr->rle_vals_segment_view.data);
 
-		// Skip the untranspose step.
-		const fastlanes::n_t offset = batch_idx * fastlanes::CFG::VEC_SZ;
+
+		// TODO: skip the untranspose or keep?
 		for (auto val_idx {0}; val_idx < fastlanes::CFG::VEC_SZ; val_idx++) {
 			target_ptr[offset + val_idx] = rle_vals[opr->idxs[val_idx]];
 		}
@@ -363,6 +367,9 @@ struct material_visitor {
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_transpose_opr<PT>> &opr) const {
+		const auto target_ptr = FlatVector::GetData<PT>(target_col);
+		generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[offset]);
+
 		DPRINT("transpose_opr<PT>");
 	}
 	template <typename PT>
@@ -449,7 +456,7 @@ struct material_visitor {
 	}
 
 	fastlanes::n_t vec_idx;
-	idx_t batch_idx;
+	idx_t offset;
 	Vector &target_col;
 };
 } // namespace duckdb

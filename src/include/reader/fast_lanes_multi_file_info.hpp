@@ -4,21 +4,21 @@
 #include "fls/reader/rowgroup_reader.hpp"
 
 namespace duckdb {
-struct FastLanesReadBindData : public TableFunctionData {
+struct FastLanesReadBindData final : TableFunctionData {
 	//! Number of rows in the first file, used for estimating the total cardinality of the to-be-read file(s).
 	idx_t initial_file_cardinality;
 	//! Number of vectors in the first file, used to determine the number of threads.
 	idx_t initial_file_n_rowgroups;
 };
 
-struct FastLanesReadLocalState : public LocalTableFunctionState {
+struct FastLanesReadLocalState final : LocalTableFunctionState {
 	idx_t cur_vector;
 	//! Rowgroup which is currently being processed.
 	idx_t cur_rowgroup;
 	fastlanes::up<fastlanes::RowgroupReader> row_group_reader;
 };
 
-struct FastLanesReadGlobalState : public GlobalTableFunctionState {
+struct FastLanesReadGlobalState final : GlobalTableFunctionState {
 	//! Index of the row group within the current file that is staged for scanning.
 	idx_t cur_rowgroup;
 };

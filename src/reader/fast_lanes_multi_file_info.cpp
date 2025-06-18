@@ -154,6 +154,7 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 	for (idx_t batch_idx = 0; batch_idx < batch_size; batch_idx++) {
 		const idx_t vector_idx = cur_vec + batch_idx;
 		const auto &expressions = local_state.row_group_reader->get_chunk(vector_idx);
+		const auto offset = batch_idx * fastlanes::CFG::VEC_SZ;
 
 		// ColumnCount is defined during the bind of the table function.
 		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
@@ -161,7 +162,7 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);
-			std::visit(material_visitor {vector_idx, batch_idx, target_col}, expr->operators[expr->operators.size() - 1]);
+			std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() - 1]);
 		}
 	}
 

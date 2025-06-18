@@ -2,19 +2,15 @@
 
 #include "fast_lanes_extension.hpp"
 #include "duckdb.hpp"
-#include "duckdb/common/exception.hpp"
-#include "duckdb/common/string_util.hpp"
-#include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
-
 #include <read_fast_lanes.hpp>
-#include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
-
+#include <write_fast_lanes.hpp>
 
 namespace duckdb {
 
 static void LoadInternal(DatabaseInstance &instance) {
 	ReadFastLanes::Register(instance);
+	WriteFastLanes::Register(instance);
 }
 
 void FastLanesExtension::Load(DuckDB &db) {
