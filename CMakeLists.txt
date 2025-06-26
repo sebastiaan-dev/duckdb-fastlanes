@@ -41,7 +41,7 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 FetchContent_Declare(
         fls_repo
         GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-        GIT_TAG dev
+        GIT_TAG cmake-overrride
 )
 #
 FetchContent_MakeAvailable(fls_repo)
@@ -53,9 +53,9 @@ target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 # -- Use a local instance of FastLanes -- #
 #set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
 #add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
-
+#
 #include_directories(${FASTLANES_DIR}/include)
-
+#
 #target_link_libraries(${EXTENSION_NAME} FastLanes)
 #target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 
