@@ -1,5 +1,7 @@
 {
   "name": "duckdb-fastlanes",
   "version": "0.1",
-  "dependencies": []
+  "dependencies": [
+    "openssl"
+  ]
 }
