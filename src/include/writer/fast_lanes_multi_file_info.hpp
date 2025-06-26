@@ -4,13 +4,13 @@
 
 namespace duckdb {
 
+//! Options for writing FastLanes files
 struct FastLanesWriteBindData final : TableFunctionData {
-	//! Options for writing FastLanes files
-
-	//! Row group size, denoted in vector count.
-	uint64_t row_group_size = fastlanes::CFG::N_VEC_PER_RG;
+	//! Row group size, denoted in the tuple count. Must be a multiple of 1024.
+	uint64_t row_group_size = fastlanes::CFG::N_VEC_PER_RG * fastlanes::CFG::VEC_SZ;
 	//! Maximum row groups that will be written to one file.
-	optional_idx row_groups_per_file;
+	size_t row_groups_per_file = 0;
+	//! If the footer should be included or separate from the FastLanes file.
 	bool inline_footer = true;
 
 	vector<LogicalType> types;
@@ -29,15 +29,15 @@ struct FastLanesWriteGlobalState final : GlobalFunctionData {
 	}
 
 	fastlanes::Connection conn;
-	unique_ptr<fastlanes::Writer> writer;
-	const std::string &file_path;
+	unique_ptr<fastlanes::FileWriter> writer;
+	const std::filesystem::path file_path;
 	//! Total number of row groups written.
 	idx_t num_row_groups;
 	std::atomic<idx_t> next_row_group;
 };
 
 struct FastLanesWriteBatchData final : PreparedBatchData {
-	unique_ptr<fastlanes::Rowgroup> row_group;
+	std::unique_ptr<fastlanes::RowGroupWriter> rg_writer;
 };
 
 /**

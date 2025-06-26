@@ -1,0 +1,13 @@
+# name: test/sql/dec_ffst_opr_str_load.test
+# description: Test loading FSST
+# group: [fls]
+
+require fast_lanes
+
+query III
+Set threads=2;
+SET preserve_insertion_order = false;
+CREATE TABLE rand_table AS SELECT random() AS col1, random() AS col2, random() AS col3 FROM range(1024 * 1);
+COPY rand_table TO 'testrg.fls' (FORMAT fls);
+----
+131072	65390.82800000039	0.4988924255371123

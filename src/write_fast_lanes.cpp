@@ -9,8 +9,10 @@
 #include <duckdb/function/copy_function.hpp>
 #include <duckdb/main/extension_util.hpp>
 #include "fls/common/magic_enum.hpp"
+#include "fls/std/variant.hpp"
 #include "fls/table/attribute.hpp"
 #include "fls/utl/cpu/arch.hpp"
+#include "fls/writer/writerv2.hpp"
 #include "include/writer/fast_lanes_multi_file_info.hpp"
 #include "reader/translation_utils.hpp"
 #include "writer/fast_lanes_multi_file_info.hpp"
@@ -44,18 +46,19 @@ static void Combine(ExecutionContext &context, FunctionData &bind_data, GlobalFu
 static bool RotateFiles(FunctionData &bind_data_p, const optional_idx &file_size_bytes) {
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
-	return bind_data.row_groups_per_file.IsValid();
+	// We only rotate files if there is a limit on how much data we can store in one file.
+	return bind_data.row_groups_per_file;
 }
 
 static bool RotateNextFile(GlobalFunctionData &gstate, FunctionData &bind_data_p, const optional_idx &file_size_bytes) {
 	auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
 	auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
-	if (!bind_data.row_groups_per_file.IsValid()) {
+	if (!bind_data.row_groups_per_file) {
 		return false;
 	}
 
-	if (global_state.num_row_groups >= bind_data.row_groups_per_file.GetIndex()) {
+	if (global_state.num_row_groups >= bind_data.row_groups_per_file) {
 		std::cout << "Rotating next file..." << '\n';
 		return true;
 	}
@@ -94,13 +97,11 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, CopyFunctionBindInp
 
 static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, FunctionData &bind_data_p,
                                                  const string &file_path) {
-	auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
+	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	auto global_state = make_uniq<FastLanesWriteGlobalState>(file_path);
 
 	global_state->conn.inline_footer();
 	global_state->next_row_group = 0;
-
-	const std::filesystem::path path = global_state->file_path;
 
 	std::vector<std::unique_ptr<fastlanes::ColumnDescriptorT>> descriptors;
 	descriptors.reserve(bind_data.names.size());
@@ -112,21 +113,28 @@ static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, Functio
 		col->name = bind_data.names.at(i);
 		col->data_type = WriterTranslateUtils::TranslateType(bind_data.types.at(i));
 
-		if (WriterTranslateUtils::TranslateType(bind_data.types.at(i)) != fastlanes::DataType::DOUBLE) {
-			std::cout << "err, not double" << '\n';
-		}
-
 		descriptors.push_back(std::move(col));
 	}
 
-	global_state->writer = make_uniq<fastlanes::Writer>(path, descriptors, global_state->conn);
+	auto writer = fastlanes::FileWriter::Builder()
+	                  .WithSchema(std::move(descriptors))
+	                  .WithPath(global_state->file_path)
+	                  .WithConnection(global_state->conn)
+	                  .WithMaxRowGroups(bind_data.row_groups_per_file)
+	                  .WithRowGroupSize(bind_data.row_group_size)
+	                  // Enable explicit flush so we can commit to a FastLanes file in the FlushBatch() function.
+	                  // This is required as PrepareBatch() can be called out-of-order, whereas FlushBatch() enforces
+	                  // order across row groups.
+	                  .WithExplicitFlush()
+	                  .Build();
+	writer.Open();
+	global_state->writer = make_uniq<fastlanes::FileWriter>(std::move(writer));
 
 	return global_state;
 }
 
-static CopyFunctionExecutionMode GetExecutionMode(bool preserve_insertion_order, bool supports_batch_index) {
-	std::cout << "GetExecutionMode()" << std::endl;
-
+static CopyFunctionExecutionMode GetExecutionMode(const bool preserve_insertion_order,
+                                                  const bool supports_batch_index) {
 	if (preserve_insertion_order) {
 		throw NotImplementedException("preserve insertion order is not supported.");
 	}
@@ -138,43 +146,142 @@ static CopyFunctionExecutionMode GetExecutionMode(bool preserve_insertion_order,
 }
 
 static idx_t GetDesiredBatchsize(ClientContext &context, FunctionData &bind_data_p) {
-	std::cout << "GetDesiredBatchsize()" << std::endl;
-
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
-	return fastlanes::CFG::VEC_SZ;
-	// return bind_data.row_group_size * fastlanes::CFG::VEC_SZ;
+	// return fastlanes::CFG::VEC_SZ;
+	return bind_data.row_group_size;
 }
 
-// TODO: Why is the chunks method faster than other exposed methods?
+template <typename DUCK_T, typename FAST_PT>
+void FillFixedWidthColumn(Vector &src, const idx_t count, std::vector<std::span<FAST_PT>> &out) {
+	const auto data_ptr = FlatVector::GetData<DUCK_T>(src);
+	out.emplace_back(reinterpret_cast<FAST_PT *>(data_ptr), count);
+}
+
+void FillStringColumn(Vector &src, const idx_t count, std::vector<fastlanes::str_pt> &scratch,
+                      std::vector<std::span<fastlanes::str_pt>> &out) {
+	const auto data_ptr = FlatVector::GetData<string_t>(src);
+	scratch.clear();
+	scratch.reserve(count);
+	for (idx_t i = 0; i < count; i++) {
+		auto &s = data_ptr[i];
+		// TODO: Probably want to pass the pointer to save a copy?
+		// auto ptr = reinterpret_cast<uint8_t const *>(s.GetDataUnsafe());
+		// auto len = static_cast<fastlanes::len_t>(s.GetSize());
+		scratch.emplace_back(s.GetString());
+	}
+	out.emplace_back(scratch.data(), scratch.size());
+}
+
+// using SpanVec_i08 = std::vector<std::span<fastlanes::i08_pt>>;
+// using SpanVec_i16 = std::vector<std::span<fastlanes::i16_pt>>;
+// using SpanVec_i32 = std::vector<std::span<fastlanes::i32_pt>>;
+// using SpanVec_flt = std::vector<std::span<fastlanes::flt_pt>>;
+using SpanVec_dbl = std::vector<std::span<fastlanes::dbl_pt>>;
+using SpanVec_str = std::vector<std::span<fastlanes::str_pt>>;
+
+// SpanVec_i08, SpanVec_i16, SpanVec_i32, SpanVec_flt,
+using AnySpanVec = std::variant<SpanVec_dbl, SpanVec_str>;
+
 // TODO: Handle non-multiple of fastlanes VEC_SZ
 static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, FunctionData &bind_data_p,
                                                   GlobalFunctionData &gstate_p,
                                                   unique_ptr<ColumnDataCollection> collection) {
-	std::cout << "PrepareBatch()" << '\n';
+	std::cout << "PrepareBatch-()" << '\n';
 
 	auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	auto &gstate = gstate_p.Cast<FastLanesWriteGlobalState>();
 	auto batch_data = make_uniq<FastLanesWriteBatchData>();
 
+	batch_data->rg_writer = gstate.writer->CreateRowGroupWriter();
+	// const auto col_count = bind_data.types.size();
+	// for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
+	// 	// We don't have to store the memory which is pointed to by the span in the local function state,
+	// 	// because the row group writer will allocate and copy to memory for the encoding internally.
+	// 	std::vector<std::span<fastlanes::str_pt>> column;
+	// 	column.reserve(collection->ChunkCount());
+	//
+	// 	for (auto &chunk : collection->Chunks()) {
+	// 		auto &src = chunk.data[col_idx];
+	// 		constexpr auto count = DEFAULT_STANDARD_VECTOR_SIZE;
+	//
+	// 		switch (src.GetType().InternalType()) {
+	// 		case PhysicalType::INT8:
+	// 			FillFixedWidthColumn<int8_t, fastlanes::i08_pt>(src, count, column);
+	// 			break;
+	// 		case PhysicalType::INT16:
+	// 			FillFixedWidthColumn<int16_t, fastlanes::i16_pt>(src, count, column);
+	// 			break;
+	// 		default:
+	// 			throw std::runtime_error("Unsupported physical type.");
+	// 		}
+	// 	}
+	//
+	// 	batch_data->rg_writer->WriteColumn(col_idx, column);
+	// }
+
 	const auto col_count = bind_data.types.size();
+	std::vector<AnySpanVec> all_columns(col_count);
+
 	for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
-		std::vector<std::span<const fastlanes::dbl_pt>> column;
-		column.reserve(collection->ChunkCount());
-
-		for (auto &chunk : collection->Chunks()) {
-			auto src = chunk.data[col_idx];
-			constexpr auto count = DEFAULT_STANDARD_VECTOR_SIZE;
-
-			// Create a new vector which gives a contiguous memory space.
-			src.Flatten(count);
-
-			const auto data_ptr = FlatVector::GetData<double>(src);
-			const std::span<const fastlanes::dbl_pt> vector(data_ptr, count);
-			column.emplace_back(vector);
+		switch (bind_data.types[col_idx].InternalType()) {
+		// case PhysicalType::INT8:
+		// 	all_columns[col_idx].emplace<SpanVec_i08>();
+		// 	break;
+		// case PhysicalType::INT16:
+		// 	all_columns[col_idx].emplace<SpanVec_i16>();
+		// 	break;
+		// case PhysicalType::INT32:
+		// 	all_columns[col_idx].emplace<SpanVec_i32>();
+		// 	break;
+		// case PhysicalType::FLOAT:
+		// 	all_columns[col_idx].emplace<SpanVec_flt>();
+		// 	break;
+		case PhysicalType::DOUBLE:
+			all_columns[col_idx].emplace<SpanVec_dbl>();
+			break;
+		case PhysicalType::VARCHAR:
+			all_columns[col_idx].emplace<SpanVec_str>();
+			break;
+		default:
+			throw std::runtime_error("Unsupported type");
 		}
+	}
 
-		gstate.writer->WriteColumn(column, col_idx);
+	for (auto &chunk : collection->Chunks()) {
+		auto vec_sz = chunk.size();
+
+		for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
+			auto &src = chunk.data[col_idx];
+			src.Flatten(vec_sz);
+
+			std::visit(fastlanes::overloaded {
+			               [&](SpanVec_dbl &vec) {
+				               auto ptr = FlatVector::GetData<double>(src);
+				               vec.emplace_back(ptr, vec_sz);
+			               },
+
+			               [&](SpanVec_str &vec) {
+				               std::vector<fastlanes::str_pt> scratch;
+				               scratch.reserve(vec_sz);
+				               const auto data_ptr = FlatVector::GetData<string_t>(src);
+				               for (idx_t i = 0; i < vec_sz; i++) {
+					               auto &s = data_ptr[i];
+					               // TODO: Probably want to pass the pointer to save a copy?
+					               // auto ptr = reinterpret_cast<uint8_t const *>(s.GetDataUnsafe());
+					               // auto len = static_cast<fastlanes::len_t>(s.GetSize());
+					               scratch.emplace_back(s.GetString());
+				               }
+				               vec.emplace_back(scratch.data(), scratch.size());
+			               }
+
+			           },
+			           all_columns[col_idx]);
+		}
+	}
+
+	for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
+		std::visit([&](auto &vec) { batch_data->rg_writer->WriteColumn(col_idx, vec); }, all_columns[col_idx]);
 	}
 
 	return batch_data;
@@ -182,21 +289,11 @@ static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, Functi
 
 static void FlushBatch(ClientContext &context, FunctionData &bind_data, GlobalFunctionData &gstate_p,
                        PreparedBatchData &batch_p) {
-	std::cout << "FlushBatches()" << '\n';
+	std::cout << "FlushBatch()" << '\n';
 	auto &gstate = gstate_p.Cast<FastLanesWriteGlobalState>();
 
-
-	if (gstate.next_row_group == 0) {
-		std::this_thread::sleep_for(std::chrono::seconds(10));
-	}
-	++gstate.next_row_group;
-
-	auto &batch_data = batch_p.Cast<FastLanesWriteBatchData>();
-
-	auto &connection = gstate.conn;
-	auto table = make_uniq<fastlanes::Table>(connection);
-	table->m_rowgroups.push_back(std::move(batch_data.row_group));
-	connection.m_table = std::move(table);
+	const auto &batch_data = batch_p.Cast<FastLanesWriteBatchData>();
+	batch_data.rg_writer->Flush();
 
 	gstate.num_row_groups++;
 }

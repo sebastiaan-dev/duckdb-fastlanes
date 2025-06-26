@@ -19,7 +19,7 @@
 #include <iostream>
 #define DPRINT(x)                                                                                                      \
 	do {                                                                                                               \
-		std::cerr << x << '\n';                                                                                   \
+		std::cerr << x << '\n';                                                                                        \
 	} while (0)
 #else
 #define DPRINT(x)                                                                                                      \
@@ -141,18 +141,8 @@ inline void t_decode_rle_range(const fastlanes::len_t *rle_lengths, const uint8_
 	}
 }
 
-/**
- * The material_visitor struct implements a visitor which selects a decoding
- * function dependent on the incoming type of the operator. The decoding function decodes directly
- * into external memory of the initiating code to save on a copy operation.
- *
- * Internally we try to use the following copy function, which provides a SIMD optimized implementation for
- * data types of different bit widths:
- *
- * fastlanes::copy(const PT* __restrict in_p, PT* __restrict out_p)
- *
- */
 struct material_visitor {
+public:
 	explicit material_visitor(const fastlanes::n_t vec_idx, const idx_t offset, Vector &target_col)
 	    : vec_idx(vec_idx), offset(offset), target_col(target_col) {};
 
@@ -162,7 +152,7 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_uncompressed_opr<PT>> &opr) const {
 		DPRINT("uncompressed_opr");
-		fastlanes::copy<PT>(opr->Data(), FlatVector::GetData<PT>(target_col));
+		fastlanes::copy<PT>(opr->Data(), GetDataPtr<PT>(target_col));
 	}
 	/**
 	 * Decode FOR vector with bit-packed values.
@@ -170,7 +160,7 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_unffor_opr<PT>> &opr) const {
 		DPRINT("unffor_opr");
-		fastlanes::copy<PT>(opr->Data(), FlatVector::GetData<PT>(target_col));
+		fastlanes::copy<PT>(opr->Data(), GetDataPtr<PT>(target_col));
 	}
 	/**
 	 * Decode ALP compressed doubles.
@@ -178,7 +168,7 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_opr<PT>> &opr) const {
 		DPRINT("alp_opr");
-		fastlanes::copy<PT>(opr->decoded_arr, FlatVector::GetData<PT>(target_col));
+		fastlanes::copy<PT>(opr->decoded_arr, GetDataPtr<PT>(target_col));
 	}
 	/**
 	 * Decode ALP compressed doubles, encoded with ALP_rd.
@@ -186,7 +176,7 @@ struct material_visitor {
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_rd_opr<PT>> &opr) const {
 		DPRINT("alp_rd_opr");
-		fastlanes::copy<PT>(opr->glue_arr, FlatVector::GetData<PT>(target_col));
+		fastlanes::copy<PT>(opr->glue_arr, GetDataPtr<PT>(target_col));
 	}
 	/**
 	 * Decode constant value.
@@ -197,8 +187,7 @@ struct material_visitor {
 		target_col.SetVectorType(VectorType::CONSTANT_VECTOR);
 		ConstantVector::SetNull(target_col, false);
 
-		const auto target = ConstantVector::GetData<PT>(target_col);
-		fastlanes::copy<PT>(&opr->value, &target[0]);
+		fastlanes::copy<PT>(&opr->value, &GetDataPtr<PT>(target_col)[0]);
 	}
 	/**
 	 * Decode constant value with string type.
@@ -209,7 +198,7 @@ struct material_visitor {
 		ConstantVector::SetNull(target_col, false);
 
 		const auto constant_value_size = static_cast<fastlanes::len_t>(opr->bytes.size());
-		const auto target = ConstantVector::GetData<string_t>(target_col);
+		const auto target = GetDataPtr<string_t>(target_col);
 		target[0] =
 		    StringVector::AddString(target_col, reinterpret_cast<char *>(opr->bytes.data()), constant_value_size);
 	}
@@ -226,7 +215,7 @@ struct material_visitor {
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fls_str_uncompressed_opr> &opr) const {
 		DPRINT("fls_str_uncompressed_opr");
-		const auto target = FlatVector::GetData<string_t>(target_col);
+		const auto target = GetDataPtr<string_t>(target_col);
 		uint64_t offset = 0;
 
 		for (size_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
@@ -244,7 +233,7 @@ struct material_visitor {
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_opr> &opr) const {
 		DPRINT("fsst_opr");
-		const auto target_ptr = FlatVector::GetData<string_t>(target_col);
+		const auto target_ptr = GetDataPtr<string_t>(target_col);
 		auto buffer = make_buffer<VectorStringBuffer>();
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst_bytes_segment_view.data);
 
@@ -283,7 +272,7 @@ struct material_visitor {
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_opr> &opr) const {
 		DPRINT("fsst12_opr");
-		const auto target_ptr = FlatVector::GetData<string_t>(target_col);
+		const auto target_ptr = GetDataPtr<string_t>(target_col);
 		auto buffer = make_buffer<VectorStringBuffer>();
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst12_bytes_segment_view.data);
 
@@ -321,7 +310,7 @@ struct material_visitor {
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> &dict_expr) const {
 		DPRINT("dict_opr<KEY_PT, INDEX_PT>");
-		const auto target_ptr = FlatVector::GetData<KEY_PT>(target_col);
+		const auto target_ptr = GetDataPtr<KEY_PT>(target_col);
 
 		const auto *key_p = dict_expr->Keys();
 		const auto *index_p = dict_expr->Index();
@@ -345,11 +334,10 @@ struct material_visitor {
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> &opr) const {
 		DPRINT("rle_map_opr<KEY_PT, INDEX_PT>");
-		const auto target_ptr = FlatVector::GetData<KEY_PT>(target_col);
+		const auto target_ptr = GetDataPtr<KEY_PT>(target_col);
 		static_assert(!std::is_same_v<KEY_PT, fastlanes::fls_string_t>,
 		              "Generic Decode logic cannot handle fls_string_t!");
 		auto *rle_vals = reinterpret_cast<KEY_PT *>(opr->rle_vals_segment_view.data);
-
 
 		// TODO: skip the untranspose or keep?
 		for (auto val_idx {0}; val_idx < fastlanes::CFG::VEC_SZ; val_idx++) {
@@ -367,7 +355,7 @@ struct material_visitor {
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_transpose_opr<PT>> &opr) const {
-		const auto target_ptr = FlatVector::GetData<PT>(target_col);
+		const auto target_ptr = GetDataPtr<PT>(target_col);
 		generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[offset]);
 
 		DPRINT("transpose_opr<PT>");
@@ -376,20 +364,20 @@ struct material_visitor {
 	void operator()(const fastlanes::sp<fastlanes::dec_slpatch_opr<PT>> &opr) const {
 		DPRINT("slpatch_opr<PT>");
 
-		const auto target = FlatVector::GetData<PT>(target_col);
+		const auto target = GetDataPtr<PT>(target_col);
 		fastlanes::copy<PT>(opr->data, target);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_opr<PT>> &opr) const {
 		DPRINT("frequency_opr<PT>");
 
-		const auto target = FlatVector::GetData<PT>(target_col);
+		const auto target = GetDataPtr<PT>(target_col);
 		fastlanes::copy<PT>(opr->data, target);
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_str_opr> &opr) const {
 		DPRINT("frequency_str_opr");
 
-		const auto target = FlatVector::GetData<string_t>(target_col);
+		const auto target = GetDataPtr<string_t>(target_col);
 		size_t entries = 0;
 
 		auto *exception_positions = reinterpret_cast<fastlanes::vec_idx_t *>(opr->exception_positions_seg.data);
@@ -428,7 +416,7 @@ struct material_visitor {
 	void operator()(const fastlanes::sp<fastlanes::dec_cross_rle_opr<PT>> &opr) const {
 		DPRINT("cross_rle_opr<PT>");
 
-		const auto target = FlatVector::GetData<PT>(target_col);
+		const auto target = GetDataPtr<PT>(target_col);
 
 		const auto *length = reinterpret_cast<const fastlanes::len_t *>(opr->lengths_segment.data);
 		const auto *values = reinterpret_cast<const PT *>(opr->values_segment.data);
@@ -440,7 +428,7 @@ struct material_visitor {
 	void operator()(const fastlanes::sp<fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>> &opr) const {
 		DPRINT("cross_rle_opr<fastlanes::fls_string_t>");
 
-		const auto target = FlatVector::GetData<string_t>(target_col);
+		const auto target = GetDataPtr<string_t>(target_col);
 
 		const auto *length = reinterpret_cast<const fastlanes::len_t *>(opr->lengths_segment.data);
 		const auto *values_bytes = reinterpret_cast<const uint8_t *>(opr->values_bytes_seg.data);
@@ -455,6 +443,15 @@ struct material_visitor {
 		throw std::runtime_error("Operation not supported");
 	}
 
+private:
+	//! Wrap the GetData function so we never forget to add the offset when we are mutating another part of the
+	//! DuckDB vector.
+	template <typename T>
+	T *GetDataPtr(Vector &col) const {
+		return FlatVector::GetData<T>(col) + offset;
+	}
+
+private:
 	fastlanes::n_t vec_idx;
 	idx_t offset;
 	Vector &target_col;
