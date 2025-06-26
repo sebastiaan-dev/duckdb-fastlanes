@@ -46,6 +46,15 @@ FetchContent_Declare(
 #
 FetchContent_MakeAvailable(fls_repo)
 include_directories(${fls_repo_SOURCE_DIR}/include)
+
+if (APPLE)
+    target_compile_options(FastLanes PRIVATE
+            $<$<CXX_COMPILER_ID:AppleClang>:-mmacosx-version-min=13.3>
+    )
+    target_link_options(FastLanes PRIVATE
+            $<$<CXX_COMPILER_ID:AppleClang>:-mmacosx-version-min=13.3>
+    )
+endif()
 #
 target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
