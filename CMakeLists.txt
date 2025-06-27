@@ -5,6 +5,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
+if(APPLE)
+    # If the user didn't already set it on the command line or in the env,
+    # force it into the cache at 13.3
+    if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3"
+                CACHE STRING "Minimum OS X deployment version" FORCE)
+    endif()
+endif()
+
 # Set extension name here
 set(TARGET_NAME fast_lanes)
 
