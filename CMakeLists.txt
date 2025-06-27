@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-
 if(APPLE)
     # If the user didn't already set it on the command line or in the env,
     # force it into the cache at 13.3
@@ -13,6 +8,19 @@ if(APPLE)
                 CACHE STRING "Minimum OS X deployment version" FORCE)
     endif()
 endif()
+
+if(APPLE)
+    # This affects all targets added *after* this point
+    add_compile_options(-mmacosx-version-min=13.3)
+    add_link_options   (-mmacosx-version-min=13.3)
+    # Also set the env var for any subprocess (in case some scripts look at it)
+    set(ENV{MACOSX_DEPLOYMENT_TARGET} "13.3")
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # Set extension name here
 set(TARGET_NAME fast_lanes)
@@ -56,14 +64,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fls_repo)
 include_directories(${fls_repo_SOURCE_DIR}/include)
 
-if (APPLE)
-    target_compile_options(FastLanes PRIVATE
-            $<$<CXX_COMPILER_ID:AppleClang>:-mmacosx-version-min=13.3>
-    )
-    target_link_options(FastLanes PRIVATE
-            $<$<CXX_COMPILER_ID:AppleClang>:-mmacosx-version-min=13.3>
-    )
-endif()
 #
 target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
