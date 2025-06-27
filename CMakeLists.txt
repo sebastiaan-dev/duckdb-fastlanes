@@ -1,26 +1,31 @@
 cmake_minimum_required(VERSION 3.5)
 
-if(APPLE)
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard" FORCE)
+set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard" FORCE)
+set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Disable extensions" FORCE)
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE CACHE BOOL "Position Independent Code" FORCE)
+
+if (APPLE)
     # If the user didn't already set it on the command line or in the env,
     # force it into the cache at 13.3
-    if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+    if (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3"
                 CACHE STRING "Minimum OS X deployment version" FORCE)
-    endif()
-endif()
+    endif ()
+endif ()
 
-if(APPLE)
+if (APPLE)
     # This affects all targets added *after* this point
     add_compile_options(-mmacosx-version-min=13.3)
-    add_link_options   (-mmacosx-version-min=13.3)
+    add_link_options(-mmacosx-version-min=13.3)
     # Also set the env var for any subprocess (in case some scripts look at it)
     set(ENV{MACOSX_DEPLOYMENT_TARGET} "13.3")
-endif()
+endif ()
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+#set(CMAKE_CXX_STANDARD 20)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(CMAKE_CXX_EXTENSIONS OFF)
+#set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # Set extension name here
 set(TARGET_NAME fast_lanes)
