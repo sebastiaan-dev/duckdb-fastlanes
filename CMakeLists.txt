@@ -51,36 +51,36 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 ##-----------------------------------------------------------------------------------------------------------------------
 ## FLS :
-include(FetchContent)
-option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
-#### TODO: enable
-option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
-
-#### Definitions: ---------------------------------------------------------------------------------------------------------
-add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-### FastLanes: -----------------------------------------------------------------------------------------------------------
-# -- Use a remote instance of FastLanes -- #
-FetchContent_Declare(
-        fls_repo
-        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-        GIT_TAG cmake-overrride
-)
+#include(FetchContent)
+#option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
+##### TODO: enable
+#option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 #
-FetchContent_MakeAvailable(fls_repo)
-include_directories(${fls_repo_SOURCE_DIR}/include)
-
+##### Definitions: ---------------------------------------------------------------------------------------------------------
+#add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+#### FastLanes: -----------------------------------------------------------------------------------------------------------
+## -- Use a remote instance of FastLanes -- #
+#FetchContent_Declare(
+#        fls_repo
+#        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
+#        GIT_TAG cmake-overrride
+#)
+##
+#FetchContent_MakeAvailable(fls_repo)
+#include_directories(${fls_repo_SOURCE_DIR}/include)
 #
-target_link_libraries(${EXTENSION_NAME} FastLanes)
-target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
-
-# -- Use a local instance of FastLanes -- #
-#set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
-#add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
-#
-#include_directories(${FASTLANES_DIR}/include)
-#
+##
 #target_link_libraries(${EXTENSION_NAME} FastLanes)
 #target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
+
+# -- Use a local instance of FastLanes -- #
+set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
+add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
+
+include_directories(${FASTLANES_DIR}/include)
+
+target_link_libraries(${EXTENSION_NAME} FastLanes)
+target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 
 #---------------------------------------------------
 
