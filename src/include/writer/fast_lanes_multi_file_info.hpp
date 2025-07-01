@@ -34,6 +34,7 @@ struct FastLanesWriteGlobalState final : GlobalFunctionData {
 	//! Total number of row groups written.
 	idx_t num_row_groups;
 	std::atomic<idx_t> next_row_group;
+	time_point<steady_clock> start;
 };
 
 struct FastLanesWriteBatchData final : PreparedBatchData {

@@ -97,8 +97,11 @@ static unique_ptr<FunctionData> Bind(ClientContext &context, CopyFunctionBindInp
 
 static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, FunctionData &bind_data_p,
                                                  const string &file_path) {
+
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	auto global_state = make_uniq<FastLanesWriteGlobalState>(file_path);
+	// TODO: temp (prev = 7365033667ns ~7s)
+	global_state->start = std::chrono::high_resolution_clock::now();
 
 	global_state->conn.inline_footer();
 	global_state->next_row_group = 0;
@@ -173,67 +176,61 @@ void FillStringColumn(Vector &src, const idx_t count, std::vector<fastlanes::str
 	out.emplace_back(scratch.data(), scratch.size());
 }
 
-// using SpanVec_i08 = std::vector<std::span<fastlanes::i08_pt>>;
-// using SpanVec_i16 = std::vector<std::span<fastlanes::i16_pt>>;
-// using SpanVec_i32 = std::vector<std::span<fastlanes::i32_pt>>;
+using SpanVec_u08 = std::vector<std::span<fastlanes::u08_pt>>;
+using SpanVec_u16 = std::vector<std::span<fastlanes::u16_pt>>;
+using SpanVec_u32 = std::vector<std::span<fastlanes::u32_pt>>;
+using SpanVec_u64 = std::vector<std::span<fastlanes::u64_pt>>;
+
+using SpanVec_i08 = std::vector<std::span<fastlanes::i08_pt>>;
+using SpanVec_i16 = std::vector<std::span<fastlanes::i16_pt>>;
+using SpanVec_i32 = std::vector<std::span<fastlanes::i32_pt>>;
+using SpanVec_i64 = std::vector<std::span<fastlanes::i64_pt>>;
+
 // using SpanVec_flt = std::vector<std::span<fastlanes::flt_pt>>;
 using SpanVec_dbl = std::vector<std::span<fastlanes::dbl_pt>>;
 using SpanVec_str = std::vector<std::span<fastlanes::str_pt>>;
 
-// SpanVec_i08, SpanVec_i16, SpanVec_i32, SpanVec_flt,
-using AnySpanVec = std::variant<SpanVec_dbl, SpanVec_str>;
+using AnySpanVec = std::variant<SpanVec_u08, SpanVec_u16, SpanVec_u32, SpanVec_u64, SpanVec_i08, SpanVec_i16,
+                                SpanVec_i32, SpanVec_i64, SpanVec_dbl, SpanVec_str>;
 
-// TODO: Handle non-multiple of fastlanes VEC_SZ
 static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, FunctionData &bind_data_p,
                                                   GlobalFunctionData &gstate_p,
                                                   unique_ptr<ColumnDataCollection> collection) {
-	std::cout << "PrepareBatch-()" << '\n';
-
 	auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	auto &gstate = gstate_p.Cast<FastLanesWriteGlobalState>();
 	auto batch_data = make_uniq<FastLanesWriteBatchData>();
 
 	batch_data->rg_writer = gstate.writer->CreateRowGroupWriter();
-	// const auto col_count = bind_data.types.size();
-	// for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
-	// 	// We don't have to store the memory which is pointed to by the span in the local function state,
-	// 	// because the row group writer will allocate and copy to memory for the encoding internally.
-	// 	std::vector<std::span<fastlanes::str_pt>> column;
-	// 	column.reserve(collection->ChunkCount());
-	//
-	// 	for (auto &chunk : collection->Chunks()) {
-	// 		auto &src = chunk.data[col_idx];
-	// 		constexpr auto count = DEFAULT_STANDARD_VECTOR_SIZE;
-	//
-	// 		switch (src.GetType().InternalType()) {
-	// 		case PhysicalType::INT8:
-	// 			FillFixedWidthColumn<int8_t, fastlanes::i08_pt>(src, count, column);
-	// 			break;
-	// 		case PhysicalType::INT16:
-	// 			FillFixedWidthColumn<int16_t, fastlanes::i16_pt>(src, count, column);
-	// 			break;
-	// 		default:
-	// 			throw std::runtime_error("Unsupported physical type.");
-	// 		}
-	// 	}
-	//
-	// 	batch_data->rg_writer->WriteColumn(col_idx, column);
-	// }
 
 	const auto col_count = bind_data.types.size();
 	std::vector<AnySpanVec> all_columns(col_count);
 
 	for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
 		switch (bind_data.types[col_idx].InternalType()) {
-		// case PhysicalType::INT8:
-		// 	all_columns[col_idx].emplace<SpanVec_i08>();
-		// 	break;
-		// case PhysicalType::INT16:
-		// 	all_columns[col_idx].emplace<SpanVec_i16>();
-		// 	break;
-		// case PhysicalType::INT32:
-		// 	all_columns[col_idx].emplace<SpanVec_i32>();
-		// 	break;
+		case PhysicalType::UINT8:
+			all_columns[col_idx].emplace<SpanVec_u08>();
+			break;
+		case PhysicalType::UINT16:
+			all_columns[col_idx].emplace<SpanVec_u16>();
+			break;
+		case PhysicalType::UINT32:
+			all_columns[col_idx].emplace<SpanVec_u32>();
+			break;
+		case PhysicalType::UINT64:
+			all_columns[col_idx].emplace<SpanVec_u64>();
+			break;
+		case PhysicalType::INT8:
+			all_columns[col_idx].emplace<SpanVec_i08>();
+			break;
+		case PhysicalType::INT16:
+			all_columns[col_idx].emplace<SpanVec_i16>();
+			break;
+		case PhysicalType::INT32:
+			all_columns[col_idx].emplace<SpanVec_i32>();
+			break;
+		case PhysicalType::INT64:
+			all_columns[col_idx].emplace<SpanVec_i64>();
+			break;
 		// case PhysicalType::FLOAT:
 		// 	all_columns[col_idx].emplace<SpanVec_flt>();
 		// 	break;
@@ -255,25 +252,65 @@ static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, Functi
 			auto &src = chunk.data[col_idx];
 			src.Flatten(vec_sz);
 
-			std::visit(fastlanes::overloaded {
-			               [&](SpanVec_dbl &vec) {
-				               auto ptr = FlatVector::GetData<double>(src);
-				               vec.emplace_back(ptr, vec_sz);
-			               },
+			std::visit(fastlanes::overloaded {[&](SpanVec_i08 &vec) {
+				                                  auto ptr = FlatVector::GetData<int8_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
 
-			               [&](SpanVec_str &vec) {
-				               std::vector<fastlanes::str_pt> scratch;
-				               scratch.reserve(vec_sz);
-				               const auto data_ptr = FlatVector::GetData<string_t>(src);
-				               for (idx_t i = 0; i < vec_sz; i++) {
-					               auto &s = data_ptr[i];
-					               // TODO: Probably want to pass the pointer to save a copy?
-					               // auto ptr = reinterpret_cast<uint8_t const *>(s.GetDataUnsafe());
-					               // auto len = static_cast<fastlanes::len_t>(s.GetSize());
-					               scratch.emplace_back(s.GetString());
-				               }
-				               vec.emplace_back(scratch.data(), scratch.size());
-			               }
+			                                  [&](SpanVec_i16 &vec) {
+				                                  auto ptr = FlatVector::GetData<int16_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_i32 &vec) {
+				                                  auto ptr = FlatVector::GetData<int32_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_i64 &vec) {
+				                                  auto ptr = FlatVector::GetData<int64_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_u08 &vec) {
+				                                  auto ptr = FlatVector::GetData<uint8_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_u16 &vec) {
+				                                  auto ptr = FlatVector::GetData<uint16_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_u32 &vec) {
+				                                  auto ptr = FlatVector::GetData<uint32_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_u64 &vec) {
+				                                  auto ptr = FlatVector::GetData<uint64_t>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_dbl &vec) {
+				                                  auto ptr = FlatVector::GetData<double>(src);
+				                                  vec.emplace_back(ptr, vec_sz);
+			                                  },
+
+			                                  [&](SpanVec_str &vec) {
+				                                  std::vector<fastlanes::str_pt> scratch;
+				                                  scratch.reserve(vec_sz);
+				                                  const auto data_ptr = FlatVector::GetData<string_t>(src);
+				                                  for (idx_t i = 0; i < vec_sz; i++) {
+					                                  auto &s = data_ptr[i];
+					                                  // TODO: Probably want to pass the pointer to save a copy?
+					                                  // auto ptr = reinterpret_cast<uint8_t const
+					                                  // *>(s.GetDataUnsafe()); auto len =
+					                                  // static_cast<fastlanes::len_t>(s.GetSize());
+					                                  scratch.emplace_back(s.GetString());
+				                                  }
+				                                  vec.emplace_back(scratch.data(), scratch.size());
+			                                  }
 
 			           },
 			           all_columns[col_idx]);
@@ -289,7 +326,6 @@ static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, Functi
 
 static void FlushBatch(ClientContext &context, FunctionData &bind_data, GlobalFunctionData &gstate_p,
                        PreparedBatchData &batch_p) {
-	std::cout << "FlushBatch()" << '\n';
 	auto &gstate = gstate_p.Cast<FastLanesWriteGlobalState>();
 
 	const auto &batch_data = batch_p.Cast<FastLanesWriteBatchData>();
@@ -303,6 +339,9 @@ static void Finalize(ClientContext &context, FunctionData &bind_data, GlobalFunc
 	auto &gstate = gstate_p.Cast<FastLanesWriteGlobalState>();
 
 	gstate.writer->Close();
+
+	const auto end = std::chrono::high_resolution_clock::now();
+	std::cout << "total time:" << end - gstate.start << "\n";
 }
 
 void WriteFastLanes::Register(DatabaseInstance &db) {
