@@ -151,7 +151,6 @@ static CopyFunctionExecutionMode GetExecutionMode(const bool preserve_insertion_
 static idx_t GetDesiredBatchsize(ClientContext &context, FunctionData &bind_data_p) {
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
-	// return fastlanes::CFG::VEC_SZ;
 	return bind_data.row_group_size;
 }
 
@@ -320,6 +319,8 @@ static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, Functi
 	for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
 		std::visit([&](auto &vec) { batch_data->rg_writer->WriteColumn(col_idx, vec); }, all_columns[col_idx]);
 	}
+
+	batch_data->rg_writer->Finalize();
 
 	return batch_data;
 }
