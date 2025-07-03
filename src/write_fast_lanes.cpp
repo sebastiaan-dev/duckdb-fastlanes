@@ -177,11 +177,13 @@ static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFun
 	const auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
 	auto &local_state = lstate.Cast<FastLanesWriteLocalState>();
 
-	local_state.buffer.Append(local_state.append_state, input);
+	if (local_state.buffer.Count() + input.size() < bind_data.row_group_size) {
+		local_state.buffer.Append(local_state.append_state, input);
+		return;
+	}
 
-	// Only do this when we have enough vectors
-	// TODO: make exact, now because we fill with 2048 we might have spillage of 1024 vectors.
-	if (local_state.buffer.Count() >= bind_data.row_group_size) {
+	if (local_state.buffer.Count() + input.size() == bind_data.row_group_size) {
+		local_state.buffer.Append(local_state.append_state, input);
 		local_state.append_state.current_chunk_state.handles.clear();
 
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
@@ -190,6 +192,35 @@ static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFun
 
 		local_state.buffer.Reset();
 		local_state.buffer.InitializeAppend(local_state.append_state);
+
+		return;
+	}
+
+	if (local_state.buffer.Count() + input.size() > bind_data.row_group_size) {
+		const idx_t space_left = bind_data.row_group_size - global_state.combine_buffer->Count();
+		const idx_t take = MinValue<idx_t>(space_left, input.size());
+
+		DataChunk fill_chunk;
+		fill_chunk.Initialize(context.client, bind_data.types);
+
+		input.Copy(fill_chunk, 0);
+		fill_chunk.SetCardinality(take);
+
+		local_state.buffer.Append(local_state.append_state, fill_chunk);
+		local_state.append_state.current_chunk_state.handles.clear();
+
+		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
+		PrepareRowGroup(*rg_writer, local_state.buffer, bind_data.types);
+		rg_writer->Flush();
+
+		local_state.buffer.Reset();
+		local_state.buffer.InitializeAppend(local_state.append_state);
+
+		DataChunk remainder;
+		remainder.Initialize(context.client, bind_data.types);
+		input.Copy(remainder, take);
+
+		local_state.buffer.Append(local_state.append_state, remainder);
 	}
 }
 
@@ -246,7 +277,7 @@ static void Combine(ExecutionContext &context, FunctionData &bind_data_p, Global
 			DataChunk dst_chunk;
 			dst_chunk.Initialize(context.client, bind_data.types);
 
-			src_chunk.Copy(dst_chunk);
+			src_chunk.Copy(dst_chunk, 0);
 			dst_chunk.SetCardinality(take);
 
 			// Fill up to the row group size and then flush.
@@ -273,108 +304,6 @@ static void Combine(ExecutionContext &context, FunctionData &bind_data_p, Global
 		global_state.combine_buffer->Combine(local_state.buffer);
 	}
 }
-
-// static void Combine(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate,
-//                     LocalFunctionData &lstate) {
-// 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-// 	auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
-// 	auto &local_state = lstate.Cast<FastLanesWriteLocalState>();
-//
-// 	// Nothing to do, leave the combine buffer for other threads.
-// 	if (local_state.buffer.Count() == 0) {
-// 		return;
-// 	}
-//
-// 	// The entire local buffer fits in the combine buffer.
-// 	if (local_state.buffer.Count() + global_state.combine_buffer->Count() < bind_data.row_group_size) {
-// 		global_state.combine_buffer->Combine();
-// 	}
-//
-// 	unique_lock guard(global_state.combine_lock);
-// 	if (global_state.combine_buffer) {
-// 		// There exists a combine buffer, if we have data in our local buffer keep adding this to the combine buffer.
-// 		// If the combine buffer reaches the row group size flush, store remaining data in a new combine buffer.
-//
-// 		for (auto& chunk : local_state.buffer.Chunks()) {
-// 			if (!global_state.combine_buffer && chunk.size() > 0) {
-// 				global_state.combine_buffer =
-// 				    make_uniq<ColumnDataCollection>(context.client, local_state.buffer.Types());
-// 			}
-//
-// 			if (global_state.combine_buffer->Count() + chunk.size() < bind_data.row_group_size) {
-// 				// If the chunk fits, add it to the combine buffer.
-// 				global_state.combine_buffer->Append(chunk);
-// 			} else if (global_state.combine_buffer->Count() + chunk.size() == bind_data.row_group_size) {
-// 				global_state.combine_buffer->Append(chunk);
-//
-// 				auto owned_combine_buffer = std::move(global_state.combine_buffer);
-//
-// 				const auto rg_writer = global_state.writer->CreateRowGroupWriter();
-// 				PrepareRowGroup(*rg_writer, *owned_combine_buffer, bind_data.types);
-// 				rg_writer->Flush();
-// 			} else {
-// 				// If the chunk does no longer fit, it means we have reached the maximum. We flush and create a new
-// 				// combine buffer.
-// 				auto owned_combine_buffer = std::move(global_state.combine_buffer);
-//
-// 				const auto rg_writer = global_state.writer->CreateRowGroupWriter();
-// 				PrepareRowGroup(*rg_writer, *owned_combine_buffer, bind_data.types);
-// 				rg_writer->Flush();
-//
-// 				global_state.combine_buffer =
-// 				    make_uniq<ColumnDataCollection>(context.client, local_state.buffer.Types());
-// 				global_state.combine_buffer->Append(chunk);
-// 			}
-// 		}
-//
-// 	} else if (local_state.buffer.Count() > 0) {
-// 		// If there is no combine buffer but there is data in the local buffer, create a combine buffer so that other
-// 		// threads may combine their local buffers into one of at least the row group size.
-// 		global_state.combine_buffer = make_uniq<ColumnDataCollection>(context.client, local_state.buffer.Types());
-// 		global_state.combine_buffer->Combine(local_state.buffer);
-// 	}
-// }
-
-// static void Combine(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate,
-//                     LocalFunctionData &lstate) {
-// 	std::cout << "Starting combine" << "\n";
-// 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-// 	auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
-// 	auto &local_state = lstate.Cast<FastLanesWriteLocalState>();
-//
-// 	unique_lock guard(global_state.combine_lock);
-// 	std::cout << "get lock" << "\n";
-// 	if (global_state.combine_buffer) {
-// 		std::cout << "buffer not empty" << "\n";
-// 		global_state.combine_buffer->Combine(local_state.buffer);
-// 		if (global_state.combine_buffer->Count() >= bind_data.row_group_size) {
-// 			std::cout << "buffer ready to be flushed" << "\n";
-// 			auto owned_combine_buffer = std::move(global_state.combine_buffer);
-// 			guard.unlock();
-//
-// 			std::cout << "retrieved buffer" << "\n";
-//
-// 			const auto rg_writer = global_state.writer->CreateRowGroupWriter();
-// 			std::cout << "will flush: " << owned_combine_buffer->Count() << " rows" << "\n";
-// 			PrepareRowGroup(*rg_writer, *owned_combine_buffer, bind_data.types);
-//
-// 			rg_writer->Flush();
-// 		}
-//
-// 		// Buffer is not yet big enough, wait for other threads to potentially fill more rows.
-// 		return;
-// 	}
-//
-// 	if (local_state.buffer.Count() > 0) {
-// 		std::cout << "buffer empty, make new" << "\n";
-// 		// If there is no combine buffer, make one and delay flushing as other threads may still enter the combine step.
-// 		global_state.combine_buffer = make_uniq<ColumnDataCollection>(context.client, local_state.buffer.Types());
-// 		global_state.combine_buffer->Combine(local_state.buffer);
-// 		return;
-// 	}
-//
-// 	std::cout << "buffer empty, do nothing" << "\n";
-// }
 
 static bool RotateFiles(FunctionData &bind_data_p, const optional_idx &file_size_bytes) {
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
@@ -503,13 +432,11 @@ static void FlushBatch(ClientContext &context, FunctionData &bind_data, GlobalFu
 }
 
 static void Finalize(ClientContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate_p) {
-	std::cout << "Exec Finalize" << "\n";
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	const auto &global_state = gstate_p.Cast<FastLanesWriteGlobalState>();
 
 	if (global_state.combine_buffer) {
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
-		std::cout << "will flush: " << global_state.combine_buffer->Count() << " rows" << "\n";
 		PrepareRowGroup(*rg_writer, *global_state.combine_buffer, bind_data.types);
 		rg_writer->Flush();
 		global_state.combine_buffer->Reset();
