@@ -17,68 +17,40 @@ struct FastLanesWriteBindData final : TableFunctionData {
 	vector<string> names;
 };
 
-struct FastLanesWriteLocalState final : LocalFunctionData {
+struct FastLanesWriteLocalState : public LocalFunctionData {
+	explicit FastLanesWriteLocalState(ClientContext &context, const vector<LogicalType> &types)
+	    : buffer(context, types) {
+		buffer.SetPartitionIndex(0); // Makes the buffer manager less likely to spill this data
+		buffer.InitializeAppend(append_state);
+	}
+
+	std::unique_ptr<fastlanes::RowGroupWriter> rg_writer;
+
+	ColumnDataCollection buffer;
+	ColumnDataAppendState append_state;
 	//! Current row group being written
-	idx_t current_row_group;
+	idx_t current_row_group = 0;
 	//! Number of rows written to the current row group
-	idx_t rows_in_row_group;
+	idx_t rows_in_row_group = 0;
 };
 
 struct FastLanesWriteGlobalState final : GlobalFunctionData {
 	explicit FastLanesWriteGlobalState(const std::string &path) : file_path(path), num_row_groups(0) {
 	}
 
+	mutex combine_lock;
+	unique_ptr<ColumnDataCollection> combine_buffer;
+
 	fastlanes::Connection conn;
-	unique_ptr<fastlanes::FileWriter> writer;
+	std::unique_ptr<fastlanes::FileWriter> writer;
 	const std::filesystem::path file_path;
 	//! Total number of row groups written.
 	idx_t num_row_groups;
 	std::atomic<idx_t> next_row_group;
-	time_point<steady_clock> start;
 };
 
 struct FastLanesWriteBatchData final : PreparedBatchData {
 	std::unique_ptr<fastlanes::RowGroupWriter> rg_writer;
 };
-
-/**
- * Define all the required functions from the MultiFileWriter template class.
- */
-// struct FastLanesMultiFileWriterInfo {
-// 	/* ---- MultiFileBind ---- */
-// 	static unique_ptr<BaseFileWriterOptions> InitializeOptions(ClientContext &context,
-// 	                                                          optional_ptr<TableFunctionInfo> info);
-// 	static bool ParseOption(ClientContext &context, const string &key, const Value &val,
-// 	                       MultiFileOptions &file_options, BaseFileWriterOptions &options);
-//
-// 	/* ---- MultiFileBindInternal ---- */
-// 	static unique_ptr<TableFunctionData> InitializeBindData(MultiFileWriterBindData &multi_file_data,
-// 	                                                       unique_ptr<BaseFileWriterOptions> options);
-// 	static void BindWriter(ClientContext &context, vector<LogicalType> &return_types, vector<string> &names,
-// 	                      MultiFileWriterBindData &bind_data);
-// 	static void FinalizeBindData(const MultiFileWriterBindData &multi_file_data);
-//
-// 	/* ---- MultiInitGlobal ---- */
-// 	static unique_ptr<GlobalTableFunctionState>
-// 	InitializeGlobalState(ClientContext &context, MultiFileWriterBindData &bind_data,
-// 	                     MultiFileWriterGlobalState &global_state);
-//
-// 	/* ---- MultiInitLocal ---- */
-// 	static unique_ptr<LocalTableFunctionState> InitializeLocalState(ExecutionContext &,
-// 	                                                              GlobalTableFunctionState &);
-//
-// 	/* ---- MultiFileWrite ---- */
-// 	static void Write(ClientContext &context, BaseFileWriter &writer, GlobalTableFunctionState &global_state,
-// 	                 LocalTableFunctionState &local_state, DataChunk &chunk);
-//
-// 	/* ---- CreateWriter ---- */
-// 	static unique_ptr<BaseFileWriter> CreateWriter(ClientContext &context, const string &file_path,
-// 	                                             const vector<LogicalType> &types, const vector<string> &names,
-// 	                                             const BaseFileWriterOptions &options,
-// 	                                             const MultiFileOptions &file_options);
-//
-// 	/* ---- FinalizeWriter ---- */
-// 	static void FinalizeWriter(ClientContext &context, BaseFileWriter &writer, GlobalTableFunctionState &global_state);
-// };
 
 } // namespace duckdb
