@@ -41,7 +41,6 @@ set(EXTENSION_SOURCES src/fast_lanes_extension.cpp
         src/reader/fast_lanes_multi_file_info.cpp
         src/reader/fast_lanes_reader.cpp
         src/reader/translation_utils.cpp
-        src/reader/materializer.cpp
         src/write_fast_lanes.cpp
         src/writer/translation_utils.cpp
 )

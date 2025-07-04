@@ -12,7 +12,6 @@
 #include "include/writer/fast_lanes_multi_file_info.hpp"
 #include "reader/translation_utils.hpp"
 #include "writer/translation_utils.hpp"
-#include "writer/materializer.hpp"
 
 #include <thread>
 
