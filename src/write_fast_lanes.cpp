@@ -74,7 +74,7 @@ void EmplaceSpanVec(const PhysicalType &type, AnySpanVec &vec) {
 	}
 }
 
-void MapVectorToSpan(Vector &src, idx_t vec_sz, AnySpanVec &dst) {
+void MapVectorToSpan(Vector &src, idx_t vec_sz, AnySpanVec &dst, std::vector<std::string> &scratch) {
 	std::visit(fastlanes::overloaded {[&](SpanVec_i08 &vec) {
 		                                  auto ptr = FlatVector::GetData<int8_t>(src);
 		                                  vec.emplace_back(ptr, vec_sz);
@@ -121,9 +121,9 @@ void MapVectorToSpan(Vector &src, idx_t vec_sz, AnySpanVec &dst) {
 	                                  },
 
 	                                  [&](SpanVec_str &vec) {
-		                                  std::vector<fastlanes::str_pt> scratch;
-		                                  scratch.reserve(vec_sz);
 		                                  const auto data_ptr = FlatVector::GetData<string_t>(src);
+		                                  const size_t start_idx = scratch.size();
+
 		                                  for (idx_t i = 0; i < vec_sz; i++) {
 			                                  auto &s = data_ptr[i];
 			                                  // TODO: Probably want to pass the pointer to save a copy?
@@ -132,7 +132,7 @@ void MapVectorToSpan(Vector &src, idx_t vec_sz, AnySpanVec &dst) {
 			                                  // static_cast<fastlanes::len_t>(s.GetSize());
 			                                  scratch.emplace_back(s.GetString());
 		                                  }
-		                                  vec.emplace_back(scratch.data(), scratch.size());
+		                                  vec.emplace_back(scratch.data() + start_idx, vec_sz);
 	                                  }
 
 	           },
@@ -148,13 +148,20 @@ void PrepareRowGroup(fastlanes::RowGroupWriter &rg_writer, const ColumnDataColle
 		EmplaceSpanVec(types[col_idx].InternalType(), all_columns[col_idx]);
 	}
 
+	std::vector<std::vector<std::string>> scratch_buffers;
+	scratch_buffers.reserve(buf.ChunkCount());
+
 	for (auto &chunk : buf.Chunks()) {
 		const auto vec_sz = chunk.size();
+		scratch_buffers.emplace_back();
+		auto &scratch = scratch_buffers.back();
+		scratch.reserve(vec_sz * col_count);
 
 		for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
 			auto &src = chunk.data[col_idx];
 			src.Flatten(vec_sz);
-			MapVectorToSpan(src, vec_sz, all_columns[col_idx]);
+
+			MapVectorToSpan(src, vec_sz, all_columns[col_idx], scratch);
 		}
 	}
 
