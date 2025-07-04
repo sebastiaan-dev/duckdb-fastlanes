@@ -477,7 +477,6 @@ void WriteFastLanes::Register(DatabaseInstance &db) {
 	fn.rotate_files = RotateFiles;
 	fn.rotate_next_file = RotateNextFile;
 
-	// TODO: What does this do?
 	fn.extension = "fls";
 
 	ExtensionUtil::RegisterFunction(db, fn);
