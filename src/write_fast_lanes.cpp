@@ -174,7 +174,7 @@ static unique_ptr<LocalFunctionData> InitLocal(ExecutionContext &context, Functi
 static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate,
                  LocalFunctionData &lstate, DataChunk &input) {
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	const auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
+	auto &global_state = gstate.Cast<FastLanesWriteGlobalState>();
 	auto &local_state = lstate.Cast<FastLanesWriteLocalState>();
 
 	if (local_state.buffer.Count() + input.size() < bind_data.row_group_size) {
@@ -189,6 +189,7 @@ static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFun
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
 		PrepareRowGroup(*rg_writer, local_state.buffer, bind_data.types);
 		rg_writer->Flush();
+		global_state.num_row_groups++;
 
 		local_state.buffer.Reset();
 		local_state.buffer.InitializeAppend(local_state.append_state);
@@ -212,6 +213,7 @@ static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFun
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
 		PrepareRowGroup(*rg_writer, local_state.buffer, bind_data.types);
 		rg_writer->Flush();
+		global_state.num_row_groups++;
 
 		local_state.buffer.Reset();
 		local_state.buffer.InitializeAppend(local_state.append_state);
@@ -252,6 +254,7 @@ static void Combine(ExecutionContext &context, FunctionData &bind_data_p, Global
 			const auto rg_writer = global_state.writer->CreateRowGroupWriter();
 			PrepareRowGroup(*rg_writer, *owned_combine_buffer, bind_data.types);
 			rg_writer->Flush();
+			global_state.num_row_groups++;
 			return;
 		}
 
@@ -288,6 +291,7 @@ static void Combine(ExecutionContext &context, FunctionData &bind_data_p, Global
 			const auto rg_writer = global_state.writer->CreateRowGroupWriter();
 			PrepareRowGroup(*rg_writer, *owned_combine_buffer, bind_data.types);
 			rg_writer->Flush();
+			global_state.num_row_groups++;
 
 			// The remaining chunks can never be larger than a row group.
 			DataChunk remainder;
@@ -321,11 +325,8 @@ static bool RotateNextFile(GlobalFunctionData &gstate, FunctionData &bind_data_p
 	}
 
 	if (global_state.num_row_groups >= bind_data.row_groups_per_file) {
-		std::cout << "Rotating next file..." << '\n';
 		return true;
 	}
-
-	std::cout << "Continuing file..." << '\n';
 
 	return false;
 }
@@ -433,12 +434,13 @@ static void FlushBatch(ClientContext &context, FunctionData &bind_data, GlobalFu
 
 static void Finalize(ClientContext &context, FunctionData &bind_data_p, GlobalFunctionData &gstate_p) {
 	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	const auto &global_state = gstate_p.Cast<FastLanesWriteGlobalState>();
+	auto &global_state = gstate_p.Cast<FastLanesWriteGlobalState>();
 
 	if (global_state.combine_buffer) {
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
 		PrepareRowGroup(*rg_writer, *global_state.combine_buffer, bind_data.types);
 		rg_writer->Flush();
+		global_state.num_row_groups++;
 		global_state.combine_buffer->Reset();
 	}
 
