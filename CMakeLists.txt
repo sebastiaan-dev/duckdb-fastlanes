@@ -5,28 +5,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard" FORCE)
 set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Disable extensions" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE CACHE BOOL "Position Independent Code" FORCE)
 
-if (APPLE)
-    # If the user didn't already set it on the command line or in the env,
-    # force it into the cache at 13.3
-    if (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3"
-                CACHE STRING "Minimum OS X deployment version" FORCE)
-    endif ()
-endif ()
-
-if (APPLE)
-    # This affects all targets added *after* this point
-    add_compile_options(-mmacosx-version-min=13.3)
-    add_link_options(-mmacosx-version-min=13.3)
-    # Also set the env var for any subprocess (in case some scripts look at it)
-    set(ENV{MACOSX_DEPLOYMENT_TARGET} "13.3")
-endif ()
-
-#set(CMAKE_CXX_STANDARD 20)
-#set(CMAKE_CXX_STANDARD_REQUIRED ON)
-#set(CMAKE_CXX_EXTENSIONS OFF)
-#set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-
 # Set extension name here
 set(TARGET_NAME fastlanes)
 
@@ -50,40 +28,27 @@ set(EXTENSION_SOURCES src/fastlanes_extension.cpp
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
-##-----------------------------------------------------------------------------------------------------------------------
-## FLS :
-#include(FetchContent)
-#option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
-##### TODO: enable
-#option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
-#
-##### Definitions: ---------------------------------------------------------------------------------------------------------
-#add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-#### FastLanes: -----------------------------------------------------------------------------------------------------------
-## -- Use a remote instance of FastLanes -- #
-#FetchContent_Declare(
-#        fls_repo
-#        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-#        GIT_TAG cmake-overrride
-#)
-##
-#FetchContent_MakeAvailable(fls_repo)
-#include_directories(${fls_repo_SOURCE_DIR}/include)
-#
-##
-#target_link_libraries(${EXTENSION_NAME} FastLanes)
-#target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
+#-----------------------------------------------------------------------------------------------------------------------
+include(FetchContent)
+option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
+#### TODO: enable
+option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
-# -- Use a local instance of FastLanes -- #
-set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
-add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
+add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-include_directories(${FASTLANES_DIR}/include)
+FetchContent_Declare(
+        fls_repo
+        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
+        GIT_TAG dev
+)
+
+FetchContent_MakeAvailable(fls_repo)
+include_directories(${fls_repo_SOURCE_DIR}/include)
+
 
 target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
-
-#---------------------------------------------------
+#-----------------------------------------------------------------------------------------------------------------------
 
 #add_subdirectory(benchmarks)
 

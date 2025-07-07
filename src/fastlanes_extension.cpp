@@ -3,8 +3,8 @@
 #include "fastlanes_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/main/extension_util.hpp"
-#include <read_fls.hpp>
-#include <write_fls.hpp>
+#include "read_fls.hpp"
+#include "write_fls.hpp"
 
 namespace duckdb {
 

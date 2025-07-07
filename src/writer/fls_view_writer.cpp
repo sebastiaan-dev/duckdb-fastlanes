@@ -1,5 +1,7 @@
 #include "writer/fls_view_writer.hpp"
 
+#include "duckdb/common/enum_util.hpp"
+
 namespace duckdb {
 
 StringViewWriterFactory::StringViewWriterFactory() {
@@ -40,7 +42,7 @@ unique_ptr<ViewWriterFactoryBase> MakeViewWriterFactory(const PhysicalType phys)
 	case PhysicalType::VARCHAR:
 		return make_uniq<StringViewWriterFactory>();
 	default:
-		return nullptr;
+		throw NotImplementedException("PhysicalType %s is not supported by FastLanes writer", EnumUtil::ToString(phys));
 	}
 }
 

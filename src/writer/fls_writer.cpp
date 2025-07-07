@@ -70,13 +70,13 @@ void FastLanesFileWriter::Sink(ExecutionContext &context, FunctionData &bind_dat
 	}
 
 	if (local_state.buffer.Count() + input.size() > bind_data.row_group_size) {
-		const idx_t space_left = bind_data.row_group_size - global_state.combine_buffer->Count();
+		const idx_t space_left = bind_data.row_group_size - local_state.buffer.Count();
 		const idx_t take = MinValue<idx_t>(space_left, input.size());
 
 		DataChunk fill_chunk;
 		fill_chunk.Initialize(context.client, bind_data.types);
 
-		input.Copy(fill_chunk, 0);
+		fill_chunk.Reference(input);
 		fill_chunk.SetCardinality(take);
 
 		local_state.buffer.Append(local_state.append_state, fill_chunk);

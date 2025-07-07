@@ -14,8 +14,10 @@ template <typename PT>
 struct PrimitiveViewWriterFactory final : ViewWriterFactoryBase {
 public:
 	unique_ptr<fastlanes::ColumnWriteView> Build(Vector &src, idx_t count) override {
+		// Ownership of the data is not needed if we use the span before the chunk (and its associated vectors) becomes
+		// invalid.
 		const auto data_ptr = FlatVector::GetData<PT>(src);
-		return make_uniq<fastlanes::PrimitiveWriteView<PT>>(std::span<PT> {data_ptr, count});
+		return make_uniq<fastlanes::PrimitiveWriteView<PT>>(std::span<const PT> {data_ptr, count});
 	}
 };
 
