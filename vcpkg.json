@@ -2,8 +2,7 @@
   "name": "duckdb-fastlanes",
   "version": "0.1",
   "dependencies": [
-    "openssl",
-    "fastlanes"
+    "openssl"
   ],
   "vcpkg-configuration": {
     "overlay-ports": [

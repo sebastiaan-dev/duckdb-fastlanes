@@ -2,7 +2,7 @@
 # description: Test loading FSST
 # group: [fls]
 
-require fast_lanes
+require fastlanes
 
 query III
 Set threads=1;

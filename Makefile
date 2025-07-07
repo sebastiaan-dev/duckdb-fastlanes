@@ -1,7 +1,7 @@
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Configuration of extension
-EXT_NAME=fast_lanes
+EXT_NAME=fastlanes
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 
 # Core extensions that we need for testing

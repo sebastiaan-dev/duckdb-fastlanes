@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-class FastLanesExtension : public Extension {
+class FastlanesExtension final : public Extension {
 public:
 	void Load(DuckDB &db) override;
 	std::string Name() override;

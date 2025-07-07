@@ -28,7 +28,7 @@ endif ()
 #set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # Set extension name here
-set(TARGET_NAME fast_lanes)
+set(TARGET_NAME fastlanes)
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -36,13 +36,15 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/fast_lanes_extension.cpp
-        src/read_fast_lanes.cpp
-        src/reader/fast_lanes_multi_file_info.cpp
-        src/reader/fast_lanes_reader.cpp
+set(EXTENSION_SOURCES src/fastlanes_extension.cpp
+        src/read_fls.cpp
+        src/reader/fls_multi_file_info.cpp
+        src/reader/fls_reader.cpp
         src/reader/translation_utils.cpp
-        src/write_fast_lanes.cpp
+        src/write_fls.cpp
         src/writer/translation_utils.cpp
+        src/writer/fls_view_writer.cpp
+        src/writer/fls_writer.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

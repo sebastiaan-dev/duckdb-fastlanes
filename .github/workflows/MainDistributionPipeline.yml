@@ -19,7 +19,7 @@ jobs:
     with:
       duckdb_version: main
       ci_tools_version: main
-      extension_name: fast_lanes
+      extension_name: fastlanes
 
   duckdb-stable-build:
     name: Build extension binaries
@@ -27,4 +27,4 @@ jobs:
     with:
       duckdb_version: v1.3.1
       ci_tools_version: v1.3.1
-      extension_name: fast_lanes
+      extension_name: fastlanes

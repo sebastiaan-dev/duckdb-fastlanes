@@ -1,6 +1,5 @@
 #pragma once
 
-#include "fls/connection.hpp"
 #include "fls/expression/cross_rle_operator.hpp"
 #include "fls/expression/frequency_operator.hpp"
 #include "fls_gen/untranspose/untranspose.hpp"
@@ -9,7 +8,6 @@
 #include <fls/expression/slpatch_operator.hpp>
 #include <fls/expression/fsst12_expression.hpp>
 #include <fls/primitive/copy/fls_copy.hpp>
-#include <duckdb/storage/segment/uncompressed.hpp>
 #include "fls/expression/dict_expression.hpp"
 #include "fls/expression/rle_expression.hpp"
 #include "zstd/common/debug.h"

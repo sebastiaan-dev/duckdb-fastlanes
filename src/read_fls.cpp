@@ -1,9 +1,9 @@
-#include "read_fast_lanes.hpp"
+#include "read_fls.hpp"
 
 #include <duckdb/main/extension_util.hpp>
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "fls/common/magic_enum.hpp"
-#include "reader/fast_lanes_multi_file_info.hpp"
+#include "reader/fls_multi_file_info.hpp"
 
 namespace duckdb {
 

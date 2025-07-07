@@ -1,10 +1,10 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "fast_lanes_extension.hpp"
+#include "fastlanes_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/main/extension_util.hpp"
-#include <read_fast_lanes.hpp>
-#include <write_fast_lanes.hpp>
+#include <read_fls.hpp>
+#include <write_fls.hpp>
 
 namespace duckdb {
 
@@ -13,16 +13,16 @@ static void LoadInternal(DatabaseInstance &instance) {
 	WriteFastLanes::Register(instance);
 }
 
-void FastLanesExtension::Load(DuckDB &db) {
+void FastlanesExtension::Load(DuckDB &db) {
 	LoadInternal(*db.instance);
 }
-std::string FastLanesExtension::Name() {
-	return "fast_lanes";
+std::string FastlanesExtension::Name() {
+	return "fastlanes";
 }
 
-std::string FastLanesExtension::Version() const {
-#ifdef EXT_VERSION_FAST_LANES
-	return EXT_VERSION_FAST_LANES;
+std::string FastlanesExtension::Version() const {
+#ifdef EXT_VERSION_FASTLANES
+	return EXT_VERSION_FASTLANES;
 #else
 	return "";
 #endif
@@ -32,12 +32,12 @@ std::string FastLanesExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void fast_lanes_init(duckdb::DatabaseInstance &db) {
+DUCKDB_EXTENSION_API void fastlanes_init(duckdb::DatabaseInstance &db) {
     duckdb::DuckDB db_wrapper(db);
-    db_wrapper.LoadExtension<duckdb::FastLanesExtension>();
+    db_wrapper.LoadExtension<duckdb::FastlanesExtension>();
 }
 
-DUCKDB_EXTENSION_API const char *fast_lanes_version() {
+DUCKDB_EXTENSION_API const char *fastlanes_version() {
 	return duckdb::DuckDB::LibraryVersion();
 }
 }
