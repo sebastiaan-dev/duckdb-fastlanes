@@ -1,7 +1,7 @@
 #pragma once
 
 #include "duckdb/common/types/vector.hpp"
-#include "fls/writer/ColumnView.hpp"
+#include "fls/writer/column_write_view.hpp"
 
 namespace duckdb {
 
