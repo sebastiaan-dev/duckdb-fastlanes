@@ -1,9 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
-
-set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard" FORCE)
-set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard" FORCE)
-set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Disable extensions" FORCE)
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE CACHE BOOL "Position Independent Code" FORCE)
+cmake_minimum_required(VERSION 3.22)
 
 # Set extension name here
 set(TARGET_NAME fastlanes)
@@ -12,6 +7,12 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
+
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard" FORCE)
+set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard" FORCE)
+set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Disable extensions" FORCE)
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE CACHE BOOL "Position Independent Code" FORCE)
+
 include_directories(src/include)
 
 set(EXTENSION_SOURCES src/fastlanes_extension.cpp
