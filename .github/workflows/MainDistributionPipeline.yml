@@ -26,5 +26,5 @@ jobs:
     uses: ./.github/workflows/_extension_distribution.yml
     with:
       duckdb_version: v1.3.1
-      ci_tools_version: v1.3.1
+      ci_tools_version: v1.3.2
       extension_name: fastlanes
