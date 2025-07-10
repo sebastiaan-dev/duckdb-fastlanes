@@ -1,16 +1,15 @@
-#include "reader/fast_lanes_multi_file_info.hpp"
+#include "reader/fls_multi_file_info.hpp"
 
 #include <fls/expression/fsst_expression.hpp>
 #include <syncstream>
 #include "fls/expression/fsst12_expression.hpp"
 #include "fls/primitive/copy/fls_copy.hpp"
-#include "reader/fast_lanes_reader.hpp"
+#include "reader/fls_reader.hpp"
 #include "reader/materializer.hpp"
 
 #include <thread>
 #include <iostream>
 #include <fls/expression/physical_expression.hpp>
-#include <fls/connection.hpp>
 #include <fls/expression/alp_expression.hpp>
 
 namespace duckdb {
@@ -63,7 +62,7 @@ void FastLanesMultiFileInfo::FinalizeBindData(const MultiFileBindData &multi_fil
 }
 
 optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData &bind_data_p,
-                                                const MultiFileGlobalState &global_state,
+                                                const MultiFileGlobalState &global_state_p,
                                                 const FileExpandResult expand_result) {
 	// If we have multiple files, we launch the maximum number of threads, this prevents situations where the first
 	// file is small or empty, leading to a single thread running the query.
@@ -75,23 +74,22 @@ optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData &bind_da
 	return MaxValue(bind_data.initial_file_n_rowgroups, static_cast<idx_t>(1));
 }
 
-shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &context,
-                                                                GlobalTableFunctionState &gstate,
-                                                                BaseUnionData &union_data,
-                                                                const MultiFileBindData &bind_data_p) {
+shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &,
+                                                                GlobalTableFunctionState &global_state_p,
+                                                                BaseUnionData &union_data, const MultiFileBindData &) {
 	return make_shared_ptr<FastLanesReader>(union_data.file);
 }
 
-shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &context,
-                                                                GlobalTableFunctionState &gstate,
+shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &,
+                                                                GlobalTableFunctionState &global_state_p,
                                                                 const OpenFileInfo &file, idx_t file_idx,
-                                                                const MultiFileBindData &bind_data) {
+                                                                const MultiFileBindData &) {
 	return make_shared_ptr<FastLanesReader>(file);
 }
 
-shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &context, const OpenFileInfo &file,
-                                                                const BaseFileReaderOptions &options,
-                                                                const MultiFileOptions &file_options) {
+shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &, const OpenFileInfo &file,
+                                                                const BaseFileReaderOptions &,
+                                                                const MultiFileOptions &) {
 	return make_shared_ptr<FastLanesReader>(file);
 };
 
@@ -99,42 +97,41 @@ void FastLanesMultiFileInfo::FinalizeReader(ClientContext &context, BaseFileRead
                                             GlobalTableFunctionState &) {
 }
 
-unique_ptr<GlobalTableFunctionState>
-FastLanesMultiFileInfo::InitializeGlobalState(ClientContext &context, MultiFileBindData &bind_data_p,
-                                              MultiFileGlobalState &global_state_p) {
+unique_ptr<GlobalTableFunctionState> FastLanesMultiFileInfo::InitializeGlobalState(ClientContext &, MultiFileBindData &,
+                                                                                   MultiFileGlobalState &) {
 	return make_uniq<FastLanesReadGlobalState>();
 }
 
-unique_ptr<LocalTableFunctionState> FastLanesMultiFileInfo::InitializeLocalState(ExecutionContext &context,
-                                                                                 GlobalTableFunctionState &gstate) {
+unique_ptr<LocalTableFunctionState> FastLanesMultiFileInfo::InitializeLocalState(ExecutionContext &,
+                                                                                 GlobalTableFunctionState &) {
 	return make_uniq<FastLanesReadLocalState>();
 }
 
-bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &context, shared_ptr<BaseFileReader> &reader_p,
-                                               GlobalTableFunctionState &gstate_p, LocalTableFunctionState &lstate_p) {
-	auto &gstate = gstate_p.Cast<FastLanesReadGlobalState>();
-	auto &lstate = lstate_p.Cast<FastLanesReadLocalState>();
+bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &, shared_ptr<BaseFileReader> &reader_p,
+                                               GlobalTableFunctionState &global_state_p,
+                                               LocalTableFunctionState &local_state_p) {
+	auto &global_state = global_state_p.Cast<FastLanesReadGlobalState>();
+	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
 	auto &reader = reader_p->Cast<FastLanesReader>();
 
 	// Check if there are noo more vectors left to scan.
-	if (gstate.cur_rowgroup >= reader.GetNRowGroups()) {
+	if (global_state.cur_rowgroup >= reader.GetNRowGroups()) {
 		return false;
 	}
 	// Prepare the local state of the current thread by informing its processing responsibilities.
-	lstate.cur_vector = 0;
-	lstate.cur_rowgroup = gstate.cur_rowgroup;
+	local_state.cur_vector = 0;
+	local_state.cur_rowgroup = global_state.cur_rowgroup;
 
-	lstate.row_group_reader = reader.CreateRowGroupReader(lstate.cur_rowgroup);
+	local_state.row_group_reader = reader.CreateRowGroupReader(local_state.cur_rowgroup);
 
 	// Consume the rowgroup in the global state.
-	gstate.cur_rowgroup++;
+	global_state.cur_rowgroup++;
 
 	return true;
 }
 
-void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader_p,
-                                  GlobalTableFunctionState &global_state_p, LocalTableFunctionState &local_state_p,
-                                  DataChunk &chunk) {
+void FastLanesMultiFileInfo::Scan(ClientContext &, BaseFileReader &reader_p, GlobalTableFunctionState &,
+                                  LocalTableFunctionState &local_state_p, DataChunk &chunk) {
 	D_ASSERT(fastlanes::CFG::VEC_SZ * 2 == STANDARD_VECTOR_SIZE);
 
 	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
@@ -154,6 +151,7 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 	for (idx_t batch_idx = 0; batch_idx < batch_size; batch_idx++) {
 		const idx_t vector_idx = cur_vec + batch_idx;
 		const auto &expressions = local_state.row_group_reader->get_chunk(vector_idx);
+		const auto offset = batch_idx * fastlanes::CFG::VEC_SZ;
 
 		// ColumnCount is defined during the bind of the table function.
 		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
@@ -161,7 +159,7 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);
-			std::visit(material_visitor {vector_idx, batch_idx, target_col}, expr->operators[expr->operators.size() - 1]);
+			std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() - 1]);
 		}
 	}
 
@@ -169,8 +167,8 @@ void FastLanesMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader
 	local_state.cur_vector += batch_size;
 }
 
-void FastLanesMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFunctionState &global_state,
-                                           LocalTableFunctionState &local_state) {
+void FastLanesMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFunctionState &global_state_p,
+                                           LocalTableFunctionState &local_state_p) {
 }
 
 void FastLanesMultiFileInfo::FinishFile(ClientContext &context, GlobalTableFunctionState &global_state_p,
@@ -192,7 +190,7 @@ double FastLanesMultiFileInfo::GetProgressInFile(ClientContext &context, const B
 	return 0;
 }
 
-void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFileBindData &bind_data,
+void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFileBindData &bind_data_p,
                                                virtual_column_map_t &result) {
 }
 

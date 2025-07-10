@@ -10,12 +10,11 @@ namespace duckdb {
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.
  */
-class FastLanesReader : public BaseFileReader {
+class FastLanesReader final : public BaseFileReader {
 public:
 	explicit FastLanesReader(OpenFileInfo file_p);
 	~FastLanesReader() override;
 
-	// TODO: What does this do?x
 	std::string GetReaderType() const override {
 		return "FastLanes";
 	}
