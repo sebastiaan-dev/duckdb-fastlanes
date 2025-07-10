@@ -207,8 +207,8 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       # Compiler
-      # CC: clang
-      # CXX: clang++
+      CC: clang-19
+      CXX: clang++-19
       # Misc
       GEN: ninja
       BUILD_SHELL: ${{ inputs.build_duckdb_shell && '1' || '0' }}
@@ -318,6 +318,8 @@ jobs:
           EXTENSION_NAME=${{ inputs.extension_name }}
           EXTENSION_CANONICAL=${{ inputs.extension_canonical }}
           LINUX_CI_IN_DOCKER=1
+          CC=clang-19
+          CXX=clang++-19
           EOF
           echo '${{ inputs.test_config }}'| jq -r '.test_env_variables // {} | to_entries | map("\(.key)=\(.value)")|.[]' >> docker_env.txt
 
