@@ -27,28 +27,6 @@
 
 namespace duckdb {
 
-struct str_inlined {
-	uint32_t length;
-	char inlined[12];
-};
-struct str_pointer {
-	uint32_t length;
-	char prefix[4];
-	char *ptr;
-};
-
-union test {
-	struct {
-		uint32_t length;
-		char prefix[4];
-		char *ptr;
-	} pointer;
-	struct {
-		uint32_t length;
-		char inlined[12];
-	} inlined;
-};
-
 //-------------------------------------------------------------------
 // Materialize
 //-------------------------------------------------------------------
@@ -275,12 +253,9 @@ public:
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst12_bytes_segment_view.data);
 
 		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
-			// std::cout << "iterate " << i << '\n';
 			generated::untranspose::fallback::scalar::untranspose_i(opr->offset_arr, opr->untrasposed_offset);
-			// std::cout << "iterate " << i << '\n';
 			fastlanes::len_t encoded_size {0};
 			fastlanes::ofs_t offset {0};
-			// std::cout << "iterate " << i << '\n';
 			if (i == 0) {
 				encoded_size = opr->untrasposed_offset[0];
 			} else {
@@ -288,13 +263,10 @@ public:
 				const auto offset_next = opr->untrasposed_offset[i];
 				encoded_size = offset_next - offset;
 			}
-			// std::cout << "iterate " << i << '\n';
 			const auto decoded_size = static_cast<fastlanes::ofs_t>(
 			    fsst12_decompress(&opr->fsst12_decoder, encoded_size, in_byte_arr,
 			                      fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
-			// std::cout << "decoded " << i << '\n';
 			in_byte_arr += encoded_size;
-			// std::cout << "iterate " << i << '\n';
 			string_t tmp = buffer->EmptyString(decoded_size);
 			auto data_ptr = tmp.GetDataWriteable();
 			memcpy(data_ptr, opr->tmp_string.data(), decoded_size);
@@ -332,6 +304,7 @@ public:
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> &opr) const {
 		DPRINT("rle_map_opr<KEY_PT, INDEX_PT>");
+
 		const auto target_ptr = GetDataPtr<KEY_PT>(target_col);
 		static_assert(!std::is_same_v<KEY_PT, fastlanes::fls_string_t>,
 		              "Generic Decode logic cannot handle fls_string_t!");
@@ -353,24 +326,22 @@ public:
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_transpose_opr<PT>> &opr) const {
+		DPRINT("transpose_opr<PT>");
+
 		const auto target_ptr = GetDataPtr<PT>(target_col);
 		generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[offset]);
-
-		DPRINT("transpose_opr<PT>");
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_slpatch_opr<PT>> &opr) const {
 		DPRINT("slpatch_opr<PT>");
 
-		const auto target = GetDataPtr<PT>(target_col);
-		fastlanes::copy<PT>(opr->data, target);
+		fastlanes::copy<PT>(opr->data, GetDataPtr<PT>(target_col));
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_opr<PT>> &opr) const {
 		DPRINT("frequency_opr<PT>");
 
-		const auto target = GetDataPtr<PT>(target_col);
-		fastlanes::copy<PT>(opr->data, target);
+		fastlanes::copy<PT>(opr->data, GetDataPtr<PT>(target_col));
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_str_opr> &opr) const {
 		DPRINT("frequency_str_opr");
