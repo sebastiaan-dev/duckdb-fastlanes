@@ -14,6 +14,17 @@
 
 namespace duckdb {
 
+unique_ptr<MultiFileReaderInterface>
+FastLanesMultiFileInfo::InitializeInterface(ClientContext &context, MultiFileReader &reader, MultiFileList &file_list) {
+	return make_uniq<FastLanesMultiFileInfo>();
+}
+
+bool FastLanesMultiFileInfo::ParseCopyOption(ClientContext &context, const string &key, const vector<Value> &values,
+                                             BaseFileReaderOptions &options_p, vector<string> &expected_names,
+                                             vector<LogicalType> &expected_types) {
+	return false;
+}
+
 unique_ptr<BaseFileReaderOptions> FastLanesMultiFileInfo::InitializeOptions(ClientContext &context,
                                                                             optional_ptr<TableFunctionInfo> info) {
 	return make_uniq<BaseFileReaderOptions>();
@@ -35,17 +46,17 @@ unique_ptr<TableFunctionData> FastLanesMultiFileInfo::InitializeBindData(MultiFi
 void FastLanesMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &return_types,
                                         vector<string> &names, MultiFileBindData &bind_data) {
 	BaseFileReaderOptions options;
-	bind_data.reader_bind = bind_data.multi_file_reader->BindReader<FastLanesMultiFileInfo>(
+	bind_data.reader_bind = bind_data.multi_file_reader->BindReader(
 	    context, return_types, names, *bind_data.file_list, bind_data, options, bind_data.file_options);
 }
 
-shared_ptr<BaseUnionData> FastLanesMultiFileInfo::GetUnionData(shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
+shared_ptr<BaseUnionData> FastLanesReader::GetUnionData(idx_t file_idx) {
 	std::cout << "Union Data" << '\n';
 
 	return nullptr;
 }
 
-void FastLanesMultiFileInfo::FinalizeBindData(const MultiFileBindData &multi_file_data) {
+void FastLanesMultiFileInfo::FinalizeBindData(MultiFileBindData &multi_file_data) {
 	auto &bind_data = multi_file_data.bind_data->Cast<FastLanesReadBindData>();
 	// If we are not using union-by-name, there must be an initial reader from which we learn the schema.
 	if (!multi_file_data.file_options.union_by_name) {
@@ -88,13 +99,11 @@ shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &,
 }
 
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext &, const OpenFileInfo &file,
-                                                                const BaseFileReaderOptions &,
-                                                                const MultiFileOptions &) {
+                                                                BaseFileReaderOptions &, const MultiFileOptions &) {
 	return make_shared_ptr<FastLanesReader>(file);
 };
 
-void FastLanesMultiFileInfo::FinalizeReader(ClientContext &context, BaseFileReader &reader,
-                                            GlobalTableFunctionState &) {
+void FastLanesReader::PrepareReader(ClientContext &context, GlobalTableFunctionState &) {
 }
 
 unique_ptr<GlobalTableFunctionState> FastLanesMultiFileInfo::InitializeGlobalState(ClientContext &, MultiFileBindData &,
@@ -107,22 +116,20 @@ unique_ptr<LocalTableFunctionState> FastLanesMultiFileInfo::InitializeLocalState
 	return make_uniq<FastLanesReadLocalState>();
 }
 
-bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &, shared_ptr<BaseFileReader> &reader_p,
-                                               GlobalTableFunctionState &global_state_p,
-                                               LocalTableFunctionState &local_state_p) {
+bool FastLanesReader::TryInitializeScan(ClientContext &, GlobalTableFunctionState &global_state_p,
+                                        LocalTableFunctionState &local_state_p) {
 	auto &global_state = global_state_p.Cast<FastLanesReadGlobalState>();
 	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
-	auto &reader = reader_p->Cast<FastLanesReader>();
 
 	// Check if there are noo more vectors left to scan.
-	if (global_state.cur_rowgroup >= reader.GetNRowGroups()) {
+	if (global_state.cur_rowgroup >= GetNRowGroups()) {
 		return false;
 	}
 	// Prepare the local state of the current thread by informing its processing responsibilities.
 	local_state.cur_vector = 0;
 	local_state.cur_rowgroup = global_state.cur_rowgroup;
 
-	local_state.row_group_reader = reader.CreateRowGroupReader(local_state.cur_rowgroup);
+	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
 
 	// Consume the rowgroup in the global state.
 	global_state.cur_rowgroup++;
@@ -130,14 +137,13 @@ bool FastLanesMultiFileInfo::TryInitializeScan(ClientContext &, shared_ptr<BaseF
 	return true;
 }
 
-void FastLanesMultiFileInfo::Scan(ClientContext &, BaseFileReader &reader_p, GlobalTableFunctionState &,
-                                  LocalTableFunctionState &local_state_p, DataChunk &chunk) {
+void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTableFunctionState &local_state_p,
+                           DataChunk &chunk) {
 	D_ASSERT(fastlanes::CFG::VEC_SZ * 2 == STANDARD_VECTOR_SIZE);
 
 	auto &local_state = local_state_p.Cast<FastLanesReadLocalState>();
-	const auto &reader = reader_p.Cast<FastLanesReader>();
 	const auto cur_vec = local_state.cur_vector;
-	const auto n_vectors = reader.GetNVectors(local_state.cur_rowgroup);
+	const auto n_vectors = GetNVectors(local_state.cur_rowgroup);
 
 	if (cur_vec >= n_vectors) {
 		return;
@@ -171,8 +177,7 @@ void FastLanesMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFu
                                            LocalTableFunctionState &local_state_p) {
 }
 
-void FastLanesMultiFileInfo::FinishFile(ClientContext &context, GlobalTableFunctionState &global_state_p,
-                                        BaseFileReader &reader) {
+void FastLanesReader::FinishFile(ClientContext &context, GlobalTableFunctionState &global_state_p) {
 	auto &g_state = global_state_p.Cast<FastLanesReadGlobalState>();
 
 	// Reset progression trackers of the current file.
@@ -186,7 +191,7 @@ unique_ptr<NodeStatistics> FastLanesMultiFileInfo::GetCardinality(const MultiFil
 	return make_uniq<NodeStatistics>(MaxValue(bind_data.initial_file_cardinality, static_cast<idx_t>(42)) * file_count);
 }
 
-double FastLanesMultiFileInfo::GetProgressInFile(ClientContext &context, const BaseFileReader &reader) {
+double FastLanesReader::GetProgressInFile(ClientContext &context) {
 	return 0;
 }
 
@@ -194,12 +199,10 @@ void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFile
                                                virtual_column_map_t &result) {
 }
 
-unique_ptr<BaseStatistics> FastLanesMultiFileInfo::GetStatistics(ClientContext &context, BaseFileReader &reader_p,
-                                                                 const string &name) {
-	const auto &reader = reader_p.Cast<FastLanesReader>();
+unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext &context, const string &name) {
 	unique_ptr<BaseStatistics> stats;
 
-	const fastlanes::TableDescriptorT table_descriptor = reader.GetFileMetadata();
+	const fastlanes::TableDescriptorT table_descriptor = GetFileMetadata();
 	for (idx_t row_group_idx = 0; row_group_idx < table_descriptor.m_rowgroup_descriptors.size(); row_group_idx++) {
 		auto &row_group_descriptor = table_descriptor.m_rowgroup_descriptors[row_group_idx];
 		auto &column_descriptors = row_group_descriptor->m_column_descriptors;

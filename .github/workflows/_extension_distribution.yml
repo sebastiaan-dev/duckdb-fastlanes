@@ -450,9 +450,6 @@ jobs:
           fetch-depth: 0
           submodules: 'recursive'
 
-      - name: Install llvm
-        uses: ./.github/actions/install-llvm
-
       - name: Install Ninja
         run: |
           brew install ninja autoconf make libtool automake autoconf-archive
@@ -545,6 +542,13 @@ jobs:
           echo "CFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
           echo "CPPFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
           echo "CXXFLAGS=-I/opt/homebrew/opt/libomp/include" >> $GITHUB_ENV
+
+      - name: Install llvm
+        uses: ./.github/actions/install-llvm
+
+      - name: Clang version
+        run: clang++ --version
+
 
       - name: Override AWS CLI
         if: ${{ (contains(format(';{0};', inputs.extra_toolchains), ';downgraded_aws_cli;')) }}
