@@ -27,6 +27,8 @@ RUN apt-get update -qq && \
       clang-${MAJOR} \
       clang++-${MAJOR} \
       clang-tidy-${MAJOR} \
+      libc++-${MAJOR}-dev \
+      libc++abi-${MAJOR}-dev \
       lld-${MAJOR} && \
     # register alternatives so `clang` points at clang-${MAJOR}, etc.
     update-alternatives --install /usr/bin/clang      clang      /usr/bin/clang-${MAJOR}       100 && \
