@@ -33,7 +33,7 @@ RUN apt-get update -qq && \
     update-alternatives --install /usr/bin/clang++    clang++    /usr/bin/clang++-${MAJOR}     100 && \
     update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${MAJOR} 100
 
-RUN "/usr/lib/llvm-${MAJOR}/bin" >> "$GITHUB_PATH"
+ENV PATH="/usr/lib/llvm-${MAJOR}/bin:${PATH}"
 
 # Install cmake 3.31
 RUN mkdir /cmake_3_31 && \
