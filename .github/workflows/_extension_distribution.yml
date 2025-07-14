@@ -320,6 +320,8 @@ jobs:
           LINUX_CI_IN_DOCKER=1
           CC=clang
           CXX=clang++
+          CXXFLAGS=-std=c++20 -stdlib=libc++
+          LDFLAGS=-stdlib=libc++
           EOF
           echo '${{ inputs.test_config }}'| jq -r '.test_env_variables // {} | to_entries | map("\(.key)=\(.value)")|.[]' >> docker_env.txt
 
@@ -447,6 +449,9 @@ jobs:
         with:
           fetch-depth: 0
           submodules: 'recursive'
+
+      - name: Install llvm
+        uses: ./.github/actions/install-llvm/action.yml
 
       - name: Install Ninja
         run: |
