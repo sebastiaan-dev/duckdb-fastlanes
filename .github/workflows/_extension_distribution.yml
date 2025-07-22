@@ -492,6 +492,8 @@ jobs:
           mkdir local_vcpkg_installation
           cmake --version
           cd local_vcpkg_installation
+          export CMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          export VCPKG_CMAKE_SYSTEM_VERSION=11.0
           git init
           git remote add origin ${{ inputs.vcpkg_url }}
           git fetch origin ${{ inputs.vcpkg_commit }}
@@ -548,7 +550,6 @@ jobs:
 
       - name: Clang version
         run: clang++ --version
-
 
       - name: Override AWS CLI
         if: ${{ (contains(format(';{0};', inputs.extra_toolchains), ';downgraded_aws_cli;')) }}
@@ -759,8 +760,7 @@ jobs:
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
           DUCKDB_PLATFORM_RTOOLS: ${{ (matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw') && 1 || 0 }}
           DUCKDB_GIT_VERSION: ${{ inputs.duckdb_version }}
-          CXXFLAGS: "-std=c++20"
-          CFLAGS: "-std=c17"
+          EXT_FLAGS:
         run: |
           make configure_ci
 
@@ -783,7 +783,7 @@ jobs:
           EXTENSION_NAME: ${{ inputs.extension_name }}
           EXTENSION_CANONICAL: ${{ inputs.extension_canonical }}
           DUCKDB_PLATFORM_RTOOLS: ${{ (matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw') && 1 || 0 }}
-          EXT_FLAGS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          EXT_FLAGS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_FLAGS="-std=gnu++20" -DCMAKE_CXX_STANDARD=20
         shell: cmd
         run: |
           if "%DUCKDB_PLATFORM_RTOOLS%" == "0" (
