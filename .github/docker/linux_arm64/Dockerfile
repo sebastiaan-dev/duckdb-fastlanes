@@ -1,13 +1,38 @@
 FROM ubuntu:18.04
 
+ARG MAJOR=18
+
 # Setup the basic necessities
 RUN apt-get update -y -qq
 RUN apt-get install -y -qq software-properties-common
 RUN apt-get install -y -qq --fix-missing ninja-build make gcc-multilib g++-multilib libssl-dev wget openjdk-8-jdk zip maven unixodbc-dev libc6-dev-i386 lib32readline6-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev gettext unzip build-essential checkinstall libffi-dev curl libz-dev openssh-client pkg-config
 RUN apt-get install -y -qq ccache autoconf
 
-# Setup cross compiler because GH actions does not have open source arm runners yet
-RUN apt-get install -y -qq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+# Install Clang
+RUN apt-get update -qq && \
+    apt-get install -y -qq \
+      wget gnupg lsb-release software-properties-common ca-certificates && \
+    wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key \
+      | gpg --dearmor \
+      | tee /usr/share/keyrings/llvm-archive-keyring.gpg >/dev/null && \
+    echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] \
+      http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-${MAJOR} main" \
+      | tee /etc/apt/sources.list.d/llvm${MAJOR}.list && \
+    apt-get update -qq && \
+    apt-get install -y -qq \
+      clang-${MAJOR} \
+      clang++-${MAJOR} \
+      clang-tidy-${MAJOR} \
+      libc++-${MAJOR}-dev \
+      libc++abi-${MAJOR}-dev \
+      lld-${MAJOR} \
+      libc6-dev:arm64 \
+      zlib1g-dev:arm64 \
+      libssl-dev:arm64 && \
+    # register alternatives so `clang` points at clang-${MAJOR}, etc.
+    update-alternatives --install /usr/bin/clang      clang      /usr/bin/clang-${MAJOR}       100 && \
+    update-alternatives --install /usr/bin/clang++    clang++    /usr/bin/clang++-${MAJOR}     100 && \
+    update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${MAJOR} 100
 
 # Install cmake 3.31
 RUN mkdir /cmake_3_31 && \
@@ -39,6 +64,8 @@ ENV VCPKG_TOOLCHAIN_PATH=/vcpkg/scripts/buildsystems/vcpkg.cmake
 
 # Common environment variables
 ENV GEN=ninja
+ENV CC="clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu"
+ENV CXX="clang++ --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu"
 
 # Specify where we expect the extension to be mounted and use that as working dir
 VOLUME /duckdb_build_dir

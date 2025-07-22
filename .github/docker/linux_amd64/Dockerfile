@@ -67,6 +67,8 @@ ENV VCPKG_TOOLCHAIN_PATH=/vcpkg/scripts/buildsystems/vcpkg.cmake
 
 # Common environment variables
 ENV GEN=ninja
+ENV CC="clang"
+ENV CXX="clang++"
 
 # Specify where we expect the extension to be mounted and use that as working dir
 VOLUME /duckdb_build_dir

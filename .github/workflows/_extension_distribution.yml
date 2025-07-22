@@ -318,8 +318,6 @@ jobs:
           EXTENSION_NAME=${{ inputs.extension_name }}
           EXTENSION_CANONICAL=${{ inputs.extension_canonical }}
           LINUX_CI_IN_DOCKER=1
-          CC=clang
-          CXX=clang++
           CXXFLAGS=-std=c++20 -stdlib=libc++
           LDFLAGS=-stdlib=libc++
           EOF
@@ -428,6 +426,7 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.VCPKG_CACHING_AWS_DEFAULT_REGION }}
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       # Misc
+      CMAKE_OSX_DEPLOYMENT_TARGET: "14.5"
       OSX_BUILD_ARCH: ${{ matrix.osx_build_arch }}
       GEN: ninja
       BUILD_SHELL: ${{ inputs.build_duckdb_shell && '1' || '0' }}
@@ -492,8 +491,6 @@ jobs:
           mkdir local_vcpkg_installation
           cmake --version
           cd local_vcpkg_installation
-          export CMAKE_OSX_DEPLOYMENT_TARGET=11.0
-          export VCPKG_CMAKE_SYSTEM_VERSION=11.0
           git init
           git remote add origin ${{ inputs.vcpkg_url }}
           git fetch origin ${{ inputs.vcpkg_commit }}
@@ -627,6 +624,8 @@ jobs:
       # Compiler
       CC: clang
       CXX: clang++
+      CMAKE_CXX_FLAGS: "-std=gnu++20"
+      CMAKE_CXX_STANDARD: 20
       # Misc
       BUILD_SHELL: ${{ inputs.build_duckdb_shell && '1' || '0' }}
       DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
@@ -760,7 +759,6 @@ jobs:
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
           DUCKDB_PLATFORM_RTOOLS: ${{ (matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw') && 1 || 0 }}
           DUCKDB_GIT_VERSION: ${{ inputs.duckdb_version }}
-          EXT_FLAGS:
         run: |
           make configure_ci
 
@@ -783,7 +781,7 @@ jobs:
           EXTENSION_NAME: ${{ inputs.extension_name }}
           EXTENSION_CANONICAL: ${{ inputs.extension_canonical }}
           DUCKDB_PLATFORM_RTOOLS: ${{ (matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw') && 1 || 0 }}
-          EXT_FLAGS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_FLAGS="-std=gnu++20" -DCMAKE_CXX_STANDARD=20
+          EXT_FLAGS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         shell: cmd
         run: |
           if "%DUCKDB_PLATFORM_RTOOLS%" == "0" (

@@ -33,27 +33,34 @@ message(STATUS "C:   ${CMAKE_C_COMPILER} (ID=${CMAKE_C_COMPILER_ID})")
 message(STATUS "C++: ${CMAKE_CXX_COMPILER} (ID=${CMAKE_CXX_COMPILER_ID})")
 
 #-----------------------------------------------------------------------------------------------------------------------
-include(FetchContent)
-option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
-#### TODO: enable
-option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
+#include(FetchContent)
+#option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
+##### TODO: enable
+#option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
+#
+#add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+#
+#FetchContent_Declare(
+#        fls_repo
+#        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
+#        GIT_TAG update
+#)
+#
+#FetchContent_MakeAvailable(fls_repo)
+#include_directories(${fls_repo_SOURCE_DIR}/include)
+#
+#
+#target_link_libraries(${EXTENSION_NAME} FastLanes)
+#target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
+#-----------------------------------------------------------------------------------------------------------------------
+# -- Use a local instance of FastLanes -- #
+set(FASTLANES_DIR "/Users/sebastiaan/repos/sebastiaan-fastlanes")
+add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
 
-add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-
-FetchContent_Declare(
-        fls_repo
-        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-        GIT_TAG update
-)
-
-FetchContent_MakeAvailable(fls_repo)
-include_directories(${fls_repo_SOURCE_DIR}/include)
-
+include_directories(${FASTLANES_DIR}/include)
 
 target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
-#-----------------------------------------------------------------------------------------------------------------------
-
 #add_subdirectory(benchmarks)
 
 install(
