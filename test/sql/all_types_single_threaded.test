@@ -1,0 +1,352 @@
+# name: test/sql/all_types_single_threaded.test
+# description: Test loading FSST
+# group: [sql]
+
+require fastlanes
+
+statement ok
+CREATE OR REPLACE MACRO compare_roundtrip(orig_tbl, rt_tbl) AS TABLE
+WITH
+  orig AS (
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY id) AS rn,
+      id,
+      col
+    FROM query_table(orig_tbl)
+  ),
+  rt AS (
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY id) AS rn,
+      id,
+      col
+    FROM query_table(rt_tbl)
+  )
+SELECT
+  COALESCE(orig.rn, rt.rn)    AS row_pos,
+  orig.id                     AS orig_id,
+  rt.id                       AS rt_id,
+  orig.col                    AS orig_col,
+  rt.col                      AS rt_col
+FROM orig
+FULL OUTER JOIN rt USING (rn)
+WHERE
+     orig.id        IS DISTINCT FROM rt.id
+  OR orig.col       IS DISTINCT FROM rt.col;
+
+statement ok
+CREATE TABLE bool_table
+AS SELECT
+    gs.val AS id,
+    (gs.val % 2 = 0) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE tinyint_table
+AS SELECT
+    gs.val AS id,
+    CAST((gs.val % 256) - 128 AS TINYINT) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE smallint_table
+AS SELECT
+    gs.val AS id,
+    CAST((gs.val % 65536) - 32768 AS SMALLINT) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE int_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val AS INTEGER) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE bigint_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val * 10 AS BIGINT) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE ubigint_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val as UBIGINT) * 10 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE hugeint_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val as HUGEINT) * -469231731687303715884105728 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE uhugeint_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val as UHUGEINT) * 469231731687303715884105728 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE float_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val AS FLOAT) / 100.0 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE double_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val AS DOUBLE) / 1000.0 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE decimal_table
+AS SELECT
+    gs.val AS id,
+    CAST(gs.val AS DECIMAL(10, 2)) / 10.0 AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE varchar_table
+AS SELECT
+    gs.val AS id,
+    'Value ' || gs.val AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE date_table
+AS SELECT
+    gs.val AS id,
+    DATE '1992-03-22' + to_days(cast(gs.val AS INTEGER)) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE timestamp_table
+AS SELECT
+    gs.val AS id,
+    TIMESTAMP '2025-01-01 00:00:00' + to_seconds(CAST(gs.val AS INTEGER)) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE timestamp_s_table
+AS SELECT
+    gs.val AS id,
+    TIMESTAMP_S '2025-01-01 00:00:00' + to_seconds(CAST(gs.val AS INTEGER)) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE timestamp_ms_table
+AS SELECT
+    gs.val AS id,
+    TIMESTAMP_MS '2025-01-01 00:00:00' + to_seconds(CAST(gs.val AS INTEGER)) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE timestamp_ns_table
+AS SELECT
+    gs.val AS id,
+    TIMESTAMP_NS '2025-01-01 00:00:00' + to_seconds(CAST(gs.val AS INTEGER)) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+CREATE TABLE blob_table
+AS SELECT
+    gs.val AS id,
+    CAST(md5(CAST(gs.val AS VARCHAR)) AS BLOB) AS col
+FROM generate_series(1, 1024) AS gs(val);
+
+statement ok
+SET threads=1;
+
+# Creating files
+
+statement ok
+COPY bool_table TO '__TEST_DIR__/bool_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY tinyint_table TO '__TEST_DIR__/tinyint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY smallint_table TO '__TEST_DIR__/smallint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY int_table TO '__TEST_DIR__/int_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY bigint_table TO '__TEST_DIR__/bigint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY ubigint_table TO '__TEST_DIR__/ubigint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY hugeint_table TO '__TEST_DIR__/hugeint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY uhugeint_table TO '__TEST_DIR__/uhugeint_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY float_table TO '__TEST_DIR__/float_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY double_table TO '__TEST_DIR__/double_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY decimal_table TO '__TEST_DIR__/decimal_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY varchar_table TO '__TEST_DIR__/varchar_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY date_table TO '__TEST_DIR__/date_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY timestamp_table TO '__TEST_DIR__/timestamp_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY timestamp_s_table TO '__TEST_DIR__/timestamp_s_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY timestamp_ms_table TO '__TEST_DIR__/timestamp_ms_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY timestamp_ns_table TO '__TEST_DIR__/timestamp_ns_table.fls' (FORMAT 'fls');
+
+statement ok
+COPY blob_table TO '__TEST_DIR__/blob_table.fls' (FORMAT 'fls');
+
+
+# Creating views
+
+statement ok
+CREATE VIEW bool_view AS SELECT * FROM read_fls('__TEST_DIR__/bool_table.fls');
+
+statement ok
+CREATE VIEW tinyint_view AS SELECT * FROM read_fls('__TEST_DIR__/tinyint_table.fls');
+
+statement ok
+CREATE VIEW smallint_view AS SELECT * FROM read_fls('__TEST_DIR__/smallint_table.fls');
+
+statement ok
+CREATE VIEW int_view AS SELECT * FROM read_fls('__TEST_DIR__/int_table.fls');
+
+statement ok
+CREATE VIEW bigint_view AS SELECT * FROM read_fls('__TEST_DIR__/bigint_table.fls');
+
+statement ok
+CREATE VIEW ubigint_view AS SELECT * FROM read_fls('__TEST_DIR__/ubigint_table.fls');
+
+statement ok
+CREATE VIEW hugeint_view AS SELECT * FROM read_fls('__TEST_DIR__/hugeint_table.fls');
+
+statement ok
+CREATE VIEW uhugeint_view AS SELECT * FROM read_fls('__TEST_DIR__/uhugeint_table.fls');
+
+statement ok
+CREATE VIEW float_view AS SELECT * FROM read_fls('__TEST_DIR__/float_table.fls');
+
+statement ok
+CREATE VIEW double_view AS SELECT * FROM read_fls('__TEST_DIR__/double_table.fls');
+
+statement ok
+CREATE VIEW decimal_view AS SELECT * FROM read_fls('__TEST_DIR__/decimal_table.fls');
+
+statement ok
+CREATE VIEW varchar_view AS SELECT * FROM read_fls('__TEST_DIR__/varchar_table.fls');
+
+statement ok
+CREATE VIEW date_view AS SELECT * FROM read_fls('__TEST_DIR__/date_table.fls');
+
+statement ok
+CREATE VIEW timestamp_view AS SELECT * FROM read_fls('__TEST_DIR__/timestamp_table.fls');
+
+statement ok
+CREATE VIEW timestamp_s_view AS SELECT * FROM read_fls('__TEST_DIR__/timestamp_s_table.fls');
+
+statement ok
+CREATE VIEW timestamp_ms_view AS SELECT * FROM read_fls('__TEST_DIR__/timestamp_ms_table.fls');
+
+statement ok
+CREATE VIEW timestamp_ns_view AS SELECT * FROM read_fls('__TEST_DIR__/timestamp_ns_table.fls');
+
+statement ok
+CREATE VIEW blob_view AS SELECT * FROM read_fls('__TEST_DIR__/blob_table.fls');
+
+# Compare source table with view
+
+query IIIII
+SELECT * FROM compare_roundtrip('bool_table', 'bool_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('tinyint_table', 'tinyint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('smallint_table', 'smallint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('int_table', 'int_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('bigint_table', 'bigint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('ubigint_table', 'ubigint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('hugeint_table', 'hugeint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('uhugeint_table', 'uhugeint_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('float_table', 'float_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('double_table', 'double_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('decimal_table', 'decimal_view');
+----
+
+query IIIII
+SELECT * FROM compare_roundtrip('varchar_table', 'varchar_view');
+----
+
+# TODO: Should be converted into correct format.
+
+# query IIIII
+# SELECT * FROM compare_roundtrip('date_table', 'date_view');
+# ----
+
+# query IIIII
+# SELECT * FROM compare_roundtrip('timestamp_table', 'timestamp_view');
+# ----
+
+# query IIIII
+# SELECT * FROM compare_roundtrip('timestamp_s_table', 'timestamp_s_view');
+# ----
+
+# query IIIII
+# SELECT * FROM compare_roundtrip('timestamp_ms_table', 'timestamp_ms_view');
+# ----
+
+# query IIIII
+# SELECT * FROM compare_roundtrip('timestamp_ns_table', 'timestamp_ns_view');
+# --------
+
+query IIIII
+SELECT * FROM compare_roundtrip('blob_table', 'blob_view');
+----

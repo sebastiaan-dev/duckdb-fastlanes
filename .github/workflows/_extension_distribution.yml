@@ -759,6 +759,8 @@ jobs:
           DUCKDB_PLATFORM: ${{ matrix.duckdb_arch }}
           DUCKDB_PLATFORM_RTOOLS: ${{ (matrix.duckdb_arch == 'windows_amd64_rtools' || matrix.duckdb_arch == 'windows_amd64_mingw') && 1 || 0 }}
           DUCKDB_GIT_VERSION: ${{ inputs.duckdb_version }}
+          CXXFLAGS: "-std=c++20"
+          CFLAGS: "-std=c17"
         run: |
           make configure_ci
 

@@ -30,7 +30,7 @@ runs:
           fi
           echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
           echo "CC=${LLVM_PREFIX}/bin/clang"  >> $GITHUB_ENV
-          echo "CXX=${LLVM_PREFIXc}/bin/clang++" >> $GITHUB_ENV
+          echo "CXX=${LLVM_PREFIX}/bin/clang++" >> $GITHUB_ENV
 
           # ── 2. Reclaim disk space so large static libs fit ───────────────────
           echo "🧹 Freeing disk space on macOS runner …"

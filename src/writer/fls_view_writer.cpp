@@ -1,8 +1,46 @@
 #include "writer/fls_view_writer.hpp"
 
 #include "duckdb/common/enum_util.hpp"
+#include "duckdb/common/types/hugeint.hpp"
+#include "fmt/core.h"
 
 namespace duckdb {
+
+Int128ViewWriterFactory::Int128ViewWriterFactory() {
+	buf.resize(DEFAULT_STANDARD_VECTOR_SIZE);
+	for (auto &e : buf) {
+		// Hugeint::HUGEINT_MINIMUM_STRING
+		e.reserve(40);
+	}
+}
+
+unique_ptr<fastlanes::ColumnWriteView> Int128ViewWriterFactory::Build(Vector &src, idx_t count) {
+	const auto data_ptr = FlatVector::GetData<hugeint_t>(src);
+	for (idx_t i = 0; i < count; i++) {
+		auto &s = data_ptr[i];
+		auto str = s.ToString();
+		buf[i].assign(str.data(), str.size());
+	}
+	return make_uniq<fastlanes::StringWriteView>(std::span<std::string> {buf.data(), count});
+}
+
+Uint128ViewWriterFactory::Uint128ViewWriterFactory() {
+	buf.resize(DEFAULT_STANDARD_VECTOR_SIZE);
+	for (auto &e : buf) {
+		// Hugeint::HUGEINT_MINIMUM_STRING
+		e.reserve(39);
+	}
+}
+
+unique_ptr<fastlanes::ColumnWriteView> Uint128ViewWriterFactory::Build(Vector &src, idx_t count) {
+	const auto data_ptr = FlatVector::GetData<uhugeint_t>(src);
+	for (idx_t i = 0; i < count; i++) {
+		auto &s = data_ptr[i];
+		auto str = s.ToString();
+		buf[i].assign(str.data(), str.size());
+	}
+	return make_uniq<fastlanes::StringWriteView>(std::span<std::string> {buf.data(), count});
+}
 
 StringViewWriterFactory::StringViewWriterFactory() {
 	buf.resize(DEFAULT_STANDARD_VECTOR_SIZE);
@@ -19,6 +57,8 @@ unique_ptr<fastlanes::ColumnWriteView> StringViewWriterFactory::Build(Vector &sr
 
 unique_ptr<ViewWriterFactoryBase> MakeViewWriterFactory(const PhysicalType phys) {
 	switch (phys) {
+	case PhysicalType::BOOL:
+		return make_uniq<PrimitiveViewWriterFactory<uint8_t>>();
 	case PhysicalType::UINT8:
 		return make_uniq<PrimitiveViewWriterFactory<uint8_t>>();
 	case PhysicalType::INT8:
@@ -35,6 +75,10 @@ unique_ptr<ViewWriterFactoryBase> MakeViewWriterFactory(const PhysicalType phys)
 		return make_uniq<PrimitiveViewWriterFactory<uint64_t>>();
 	case PhysicalType::INT64:
 		return make_uniq<PrimitiveViewWriterFactory<int64_t>>();
+	case PhysicalType::INT128:
+		return make_uniq<Int128ViewWriterFactory>();
+	case PhysicalType::UINT128:
+		return make_uniq<Uint128ViewWriterFactory>();
 	case PhysicalType::FLOAT:
 		return make_uniq<PrimitiveViewWriterFactory<float>>();
 	case PhysicalType::DOUBLE:

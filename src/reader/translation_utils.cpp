@@ -29,6 +29,8 @@ LogicalType TranslateUtils::TranslateType(const fastlanes::DataType type) {
 		return LogicalType::BOOLEAN;
 	case fastlanes::DataType::DATE:
 		return LogicalType::DATE;
+	case fastlanes::DataType::TIMESTAMP:
+		return LogicalType::TIMESTAMP;
 	case fastlanes::DataType::BYTE_ARRAY:
 		return LogicalType::BLOB;
 	case fastlanes::DataType::LIST:
