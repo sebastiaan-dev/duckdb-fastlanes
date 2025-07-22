@@ -1,12 +1,16 @@
-FROM ubuntu:18.04
+FROM quay.io/pypa/manylinux_2_28_aarch64
 
 ARG MAJOR=18
 
 # Setup the basic necessities
-RUN apt-get update -y -qq
-RUN apt-get install -y -qq software-properties-common
-RUN apt-get install -y -qq --fix-missing ninja-build make gcc-multilib g++-multilib libssl-dev wget openjdk-8-jdk zip maven unixodbc-dev libc6-dev-i386 lib32readline6-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev gettext unzip build-essential checkinstall libffi-dev curl libz-dev openssh-client pkg-config
-RUN apt-get install -y -qq ccache autoconf
+RUN yum install -y curl zip unzip tar autoconf
+RUN yum install -y ninja-build
+RUN yum install -y perl-IPC-Cmd
+RUN yum install -y ccache
+RUN yum install -y java-11-openjdk-devel maven
+RUN yum install -y wget
+RUN yum install -y kernel-headers
+RUN yum install -y jq
 
 # Install Clang
 RUN apt-get update -qq && \
@@ -25,34 +29,33 @@ RUN apt-get update -qq && \
       clang-tidy-${MAJOR} \
       libc++-${MAJOR}-dev \
       libc++abi-${MAJOR}-dev \
-      lld-${MAJOR} \
-      libc6-dev:arm64 \
-      zlib1g-dev:arm64 \
-      libssl-dev:arm64 && \
+      lld-${MAJOR} && \
     # register alternatives so `clang` points at clang-${MAJOR}, etc.
     update-alternatives --install /usr/bin/clang      clang      /usr/bin/clang-${MAJOR}       100 && \
     update-alternatives --install /usr/bin/clang++    clang++    /usr/bin/clang++-${MAJOR}     100 && \
     update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${MAJOR} 100
 
-# Install cmake 3.31
-RUN mkdir /cmake_3_31 && \
-    cd /cmake_3_31 && \
-    wget https://github.com/Kitware/CMake/releases/download/v3.31.3/cmake-3.31.3-linux-x86_64.sh && \
-    chmod +x cmake-3.31.3-linux-x86_64.sh && \
-    ./cmake-3.31.3-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+ENV PATH="/usr/lib/llvm-${MAJOR}/bin:${PATH}"
+
+# We need a recent CMake
+RUN mkdir /cmake_4_02 && \
+    cd /cmake_4_02 && \
+    wget https://github.com/Kitware/CMake/releases/download/v4.0.2/cmake-4.0.2-linux-aarch64.sh && \
+    chmod +x cmake-4.0.2-linux-aarch64.sh  && \
+    ./cmake-4.0.2-linux-aarch64.sh --skip-license --prefix=/usr/local && \
     cmake --version
 
-# Install GIT
-RUN wget https://github.com/git/git/archive/refs/tags/v2.25.0.tar.gz && \
-    tar xvf v2.25.0.tar.gz && \
-    cd git-2.25.0 && \
-    make && \
-    make prefix=/usr install
+# Install the AWS cli, since the packaged version is too old
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.22.35.zip" -o "awscliv2.zip"
+RUN unzip -q awscliv2.zip
+RUN ./aws/install
+RUN aws --version
 
 # Setup VCPKG n a mounted volume TODO: figure out how to cache this
 ARG vcpkg_url
 ARG vcpkg_commit
 RUN mkdir /vcpkg && \
+    cmake --version && \
     cd /vcpkg && \
     git init && \
     git remote add origin $vcpkg_url && \
@@ -61,15 +64,19 @@ RUN mkdir /vcpkg && \
     ./bootstrap-vcpkg.sh
 ENV VCPKG_ROOT=/vcpkg
 ENV VCPKG_TOOLCHAIN_PATH=/vcpkg/scripts/buildsystems/vcpkg.cmake
+ENV PATH="${VCPKG_ROOT}:${PATH}"
 
 # Common environment variables
 ENV GEN=ninja
-ENV CC="clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu"
-ENV CXX="clang++ --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu"
+ENV CC="clang"
+ENV CXX="clang++"
 
 # Specify where we expect the extension to be mounted and use that as working dir
 VOLUME /duckdb_build_dir
 WORKDIR /duckdb_build_dir
+
+# Allow git access to the mounted volume
+RUN git config --global --add safe.directory "*"
 
 # Mount for ccache to allow restoring ccache in GH actions
 VOLUME /ccache_dir
@@ -90,14 +97,14 @@ ARG extra_toolchains
 # Install Parser tools
 RUN case "$extra_toolchains" in \
   *\;parser_tools\;*) \
-    apt-get install -y -qq bison flex \
+   yum install -y bison flex \
   ;; \
 esac
 
 # Install Fortran
 RUN case "$extra_toolchains" in \
   *\;fortran\;*) \
-    apt-get install -y -qq gfortran gfortran-aarch64-linux-gnu \
+    yum install -y gcc-gfortran \
   ;; \
 esac
 
@@ -106,20 +113,16 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN case "$extra_toolchains" in \
   *\;rust\;*) \
     curl https://sh.rustup.rs -sSf | bash -s -- -y; \
-    rustup target add aarch64-unknown-linux-gnu \
   ;; \
 esac
 
 # Configure go
+ENV PATH="/usr/local/go/bin:${PATH}"
 RUN case "$extra_toolchains" in \
   *\;go\;*) \
-    apt-get install -y -qq golang-go \
-  ;; \
-esac
-
-# Install Python3
-RUN case "$extra_toolchains" in \
-  *\;python3\;*) \
-    apt-get install -y -qq python3 \
+    wget https://go.dev/dl/go1.20.5.linux-arm64.tar.gz && \
+    tar -xzvf go1.20.5.linux-arm64.tar.gz && \
+    mv go /usr/local &&\
+    go version \
   ;; \
 esac
