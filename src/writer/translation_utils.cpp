@@ -25,6 +25,10 @@ fastlanes::DataType WriterTranslateUtils::TranslateType(const LogicalType &type)
 		return fastlanes::DataType::UINT32;
 	case LogicalTypeId::UBIGINT:
 		return fastlanes::DataType::UINT64;
+	case LogicalTypeId::HUGEINT:
+		return fastlanes::DataType::FLS_STR;
+	case LogicalTypeId::UHUGEINT:
+		return fastlanes::DataType::FLS_STR;
 	case LogicalTypeId::VARCHAR:
 	case LogicalTypeId::CHAR:
 		// FIXME: DataType::STR does not work, this causes a crash as TypedStats in the TypedCol initialises to a
@@ -34,6 +38,8 @@ fastlanes::DataType WriterTranslateUtils::TranslateType(const LogicalType &type)
 		return fastlanes::DataType::BOOLEAN;
 	case LogicalTypeId::DATE:
 		return fastlanes::DataType::DATE;
+	case LogicalTypeId::TIMESTAMP:
+		return fastlanes::DataType::TIMESTAMP;
 	case LogicalTypeId::BLOB:
 		return fastlanes::DataType::BYTE_ARRAY;
 	case LogicalTypeId::LIST:

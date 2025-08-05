@@ -19,7 +19,17 @@ public:
 		return "FastLanes";
 	}
 
-	const fastlanes::TableDescriptorT& GetFileMetadata() const;
+	bool TryInitializeScan(ClientContext &context, GlobalTableFunctionState &gstate,
+	                       LocalTableFunctionState &lstate) override;
+	void Scan(ClientContext &context, GlobalTableFunctionState &global_state, LocalTableFunctionState &local_state,
+	          DataChunk &chunk) override;
+	void PrepareReader(ClientContext &context, GlobalTableFunctionState &) override;
+	void FinishFile(ClientContext &context, GlobalTableFunctionState &global_state_p) override;
+	double GetProgressInFile(ClientContext &context) override;
+	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, const string &name) override;
+	shared_ptr<BaseUnionData> GetUnionData(idx_t file_idx) override;
+
+	const fastlanes::TableDescriptorT &GetFileMetadata() const;
 	idx_t GetNRowGroups() const;
 	idx_t GetNRows() const;
 	idx_t GetNVectors(idx_t row_group_idx) const;
@@ -31,4 +41,4 @@ private:
 	fastlanes::Connection conn;
 	unique_ptr<fastlanes::TableReader> table_reader;
 };
-}
+} // namespace duckdb

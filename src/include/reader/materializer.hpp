@@ -7,6 +7,7 @@
 #include "fls/expression/fsst_expression.hpp"
 #include <fls/expression/slpatch_operator.hpp>
 #include <fls/expression/fsst12_expression.hpp>
+#include "fls/expression/fsst_dict_operator.hpp"
 #include <fls/primitive/copy/fls_copy.hpp>
 #include "fls/expression/dict_expression.hpp"
 #include "fls/expression/rle_expression.hpp"
@@ -182,15 +183,20 @@ public:
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::PhysicalExpr> &expr) const {
 		DPRINT("PhysicalExpr");
+
+		throw std::runtime_error("Operation not supported");
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_struct_opr> &struct_expr) const {
 		DPRINT("struct_opr");
+
+		throw std::runtime_error("Operation not supported");
 	}
 	/**
 	 * Unpack uncompressed strings.
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fls_str_uncompressed_opr> &opr) const {
 		DPRINT("fls_str_uncompressed_opr");
+
 		const auto target = GetDataPtr<string_t>(target_col);
 		uint64_t offset = 0;
 
@@ -209,8 +215,9 @@ public:
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_opr> &opr) const {
 		DPRINT("fsst_opr");
+
 		const auto target_ptr = GetDataPtr<string_t>(target_col);
-		auto buffer = make_buffer<VectorStringBuffer>();
+		// auto buffer = make_buffer<VectorStringBuffer>();
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst_bytes_segment_view.data);
 
 		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
@@ -232,14 +239,11 @@ public:
 			                    fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
 			in_byte_arr += encoded_size;
 
-			string_t tmp = buffer->EmptyString(decoded_size);
-			auto data_ptr = tmp.GetDataWriteable();
-			memcpy(data_ptr, opr->tmp_string.data(), decoded_size);
-
-			target_ptr[i] = tmp;
+			target_ptr[i] = StringVector::AddString(
+				target_col, reinterpret_cast<const char *>(opr->tmp_string.data()), decoded_size);
 		}
 
-		target_col.SetAuxiliary(buffer);
+		// target_col.SetAuxiliary(buffer);
 	}
 	/**
 	 * Decode strings which are compressed using FSST (12-bit encoded).
@@ -248,8 +252,9 @@ public:
 	 */
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_opr> &opr) const {
 		DPRINT("fsst12_opr");
+
 		const auto target_ptr = GetDataPtr<string_t>(target_col);
-		auto buffer = make_buffer<VectorStringBuffer>();
+		// auto buffer = make_buffer<VectorStringBuffer>();
 		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst12_bytes_segment_view.data);
 
 		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
@@ -267,39 +272,95 @@ public:
 			    fsst12_decompress(&opr->fsst12_decoder, encoded_size, in_byte_arr,
 			                      fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
 			in_byte_arr += encoded_size;
-			string_t tmp = buffer->EmptyString(decoded_size);
-			auto data_ptr = tmp.GetDataWriteable();
-			memcpy(data_ptr, opr->tmp_string.data(), decoded_size);
 
-			target_ptr[i] = tmp;
+			target_ptr[i] = StringVector::AddString(
+				target_col, reinterpret_cast<const char *>(opr->tmp_string.data()), decoded_size);
 		}
 
-		target_col.SetAuxiliary(buffer);
+		// target_col.SetAuxiliary(buffer);
 	}
 	// DICT
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> &dict_expr) const {
 		DPRINT("dict_opr<KEY_PT, INDEX_PT>");
+
 		const auto target_ptr = GetDataPtr<KEY_PT>(target_col);
 
 		const auto *key_p = dict_expr->Keys();
 		const auto *index_p = dict_expr->Index();
 
 		for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
-			target_ptr[idx + offset] = key_p[index_p[idx]];
+			target_ptr[idx] = key_p[index_p[idx]];
 		}
 	}
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> &opr) const {
 		DPRINT("dict_opr<fastlanes::fls_string_t, INDEX_PT>");
+
+		const auto target_ptr = GetDataPtr<string_t>(target_col);
+		// auto buffer = make_buffer<VectorStringBuffer>();
+
+		FLS_ASSERT_NOT_NULL_POINTER(opr->index_arr)
+		FLS_ASSERT_NOT_NULL_POINTER(opr->Offsets())
+		FLS_ASSERT_NOT_NULL_POINTER(opr->Bytes())
+
+		for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
+			const auto index = opr->Index()[idx];
+			fastlanes::ofs_t offset;
+
+			if (index == 0) {
+				offset = 0;
+			} else {
+				offset = opr->Offsets()[index - 1];
+			}
+			const auto offset_next = opr->Offsets()[index];
+			const auto length = offset_next - offset;
+
+			target_ptr[idx] = StringVector::AddString(
+				target_col, reinterpret_cast<const char *>(opr->Bytes() + offset), length);
+		}
 	}
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst_dict_opr<INDEX_PT>> &opr) const {
 		DPRINT("fsst_dict_opr<INDEX_PT>");
+
+		const auto target_ptr = GetDataPtr<string_t>(target_col);
+		// auto buffer = make_buffer<VectorStringBuffer>();
+		auto *in_byte_arr = reinterpret_cast<uint8_t *>(opr->fsst_bytes_segment_view.data);
+
+		FLS_ASSERT_NOT_NULL_POINTER(in_byte_arr)
+
+		for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
+			const auto index = opr->Index()[idx];
+
+			fastlanes::ofs_t offset = 0;
+			fastlanes::len_t length = 0;
+
+			if (index == 0) {
+				offset = 0;
+				length = opr->Offsets()[index];
+			} else {
+				offset = opr->Offsets()[index - 1];
+				const auto offset_next = opr->Offsets()[index];
+				length = offset_next - offset;
+			}
+			FLS_ASSERT_LE(length, fastlanes::CFG::String::max_bytes_per_string)
+
+			const auto decoded_size = static_cast<fastlanes::ofs_t>(
+			    fsst_decompress(&opr->fsst_decoder, length, in_byte_arr + offset,
+			                    fastlanes::CFG::String::max_bytes_per_string, opr->tmp_string.data()));
+
+			FLS_ASSERT_L(decoded_size, opr->tmp_string.capacity())
+
+			target_ptr[idx] = StringVector::AddString(
+			    target_col, reinterpret_cast<const char *>(opr->tmp_string.data()), decoded_size);
+		}
 	}
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_fsst12_dict_opr<INDEX_PT>> &opr) const {
 		DPRINT("fsst12_dict_opr<INDEX_PT>");
+
+		throw std::runtime_error("Operation not supported");
 	}
 	template <typename KEY_PT, typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> &opr) const {
@@ -312,24 +373,28 @@ public:
 
 		// TODO: skip the untranspose or keep?
 		for (auto val_idx {0}; val_idx < fastlanes::CFG::VEC_SZ; val_idx++) {
-			target_ptr[offset + val_idx] = rle_vals[opr->idxs[val_idx]];
+			target_ptr[val_idx] = rle_vals[opr->idxs[val_idx]];
 		}
 	}
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>> &opr) const {
 		DPRINT("rle_map_opr<fls_string_t, INDEX_PT>");
+
+		throw std::runtime_error("Operation not supported");
 	}
 
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_null_opr<PT>> &opr) const {
 		DPRINT("null_opr<PT>");
+
+		throw std::runtime_error("Operation not supported");
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_transpose_opr<PT>> &opr) const {
 		DPRINT("transpose_opr<PT>");
 
 		const auto target_ptr = GetDataPtr<PT>(target_col);
-		generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[offset]);
+		generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[0]);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_slpatch_opr<PT>> &opr) const {
@@ -384,7 +449,6 @@ public:
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_cross_rle_opr<PT>> &opr) const {
 		DPRINT("cross_rle_opr<PT>");
-
 		const auto target = GetDataPtr<PT>(target_col);
 
 		const auto *length = reinterpret_cast<const fastlanes::len_t *>(opr->lengths_segment.data);

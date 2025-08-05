@@ -21,6 +21,24 @@ public:
 	}
 };
 
+struct Int128ViewWriterFactory final : ViewWriterFactoryBase {
+public:
+	explicit Int128ViewWriterFactory();
+	unique_ptr<fastlanes::ColumnWriteView> Build(Vector &src, idx_t count) override;
+
+private:
+	vector<string> buf;
+};
+
+struct Uint128ViewWriterFactory final : ViewWriterFactoryBase {
+public:
+	explicit Uint128ViewWriterFactory();
+	unique_ptr<fastlanes::ColumnWriteView> Build(Vector &src, idx_t count) override;
+
+private:
+	vector<string> buf;
+};
+
 struct StringViewWriterFactory final : ViewWriterFactoryBase {
 public:
 	explicit StringViewWriterFactory();
