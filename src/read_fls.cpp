@@ -9,11 +9,10 @@ namespace duckdb {
 
 
 void ReadFastLanes::Register(DatabaseInstance &db) {
-	const MultiFileFunction<FastLanesMultiFileInfo> fn("read_fls");
-	// table_function.statistics = MultiFileFunction<FastLanesMultiFileInfo>::MultiFileScanStats;
-	// table_function.filter_pushdown = true;
-	// table_function.filter_prune = true;
-	// table_function.projection_pushdown = true;
+	MultiFileFunction<FastLanesMultiFileInfo> fn("read_fls");
+	// fn.statistics = MultiFileFunction<FastLanesMultiFileInfo>::MultiFileScanStats;
+	// fn.filter_pushdown = true;
+	// fn.filter_prune = true;
 
 	ExtensionUtil::RegisterFunction(db, MultiFileReader::CreateFunctionSet(static_cast<TableFunction>(fn)));
 }

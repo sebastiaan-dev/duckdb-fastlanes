@@ -46,8 +46,8 @@ unique_ptr<TableFunctionData> FastLanesMultiFileInfo::InitializeBindData(MultiFi
 void FastLanesMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &return_types,
                                         vector<string> &names, MultiFileBindData &bind_data) {
 	BaseFileReaderOptions options;
-	bind_data.reader_bind = bind_data.multi_file_reader->BindReader(
-	    context, return_types, names, *bind_data.file_list, bind_data, options, bind_data.file_options);
+	bind_data.reader_bind = bind_data.multi_file_reader->BindReader(context, return_types, names, *bind_data.file_list,
+	                                                                bind_data, options, bind_data.file_options);
 }
 
 shared_ptr<BaseUnionData> FastLanesReader::GetUnionData(idx_t file_idx) {
@@ -160,8 +160,10 @@ void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTab
 		const auto offset = batch_idx * fastlanes::CFG::VEC_SZ;
 
 		// ColumnCount is defined during the bind of the table function.
-		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
-			auto &target_col = chunk.data[col_idx];
+		for (idx_t i = 0; i < column_ids.size(); i++) {
+			const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
+
+			auto &target_col = chunk.data[i];
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);

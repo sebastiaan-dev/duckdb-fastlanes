@@ -249,17 +249,19 @@ unique_ptr<GlobalFunctionData> FastLanesFileWriter::InitGlobal(ClientContext &co
 		descriptors.push_back(std::move(col));
 	}
 
-	global_state->writer = fastlanes::FileWriter::Builder()
-	                           .WithSchema(std::move(descriptors))
-	                           .WithPath(global_state->file_path)
-	                           .WithConnection(global_state->conn)
-	                           .WithMaxRowGroups(bind_data.row_groups_per_file)
-	                           .WithRowGroupSize(bind_data.row_group_size)
-	                           // Enable explicit flush so we can commit to a FastLanes file in the
-	                           // FlushBatch() function. This is required as PrepareBatch() can be called
-	                           // out-of-order, whereas FlushBatch() enforces order across row groups.
-	                           .WithExplicitFlush()
-	                           .Build();
+	global_state->writer =
+	    fastlanes::FileWriter::Builder()
+	        .WithSchema(std::move(descriptors))
+	        .WithPath(global_state->file_path)
+	        .WithConnection(global_state->conn)
+	        .WithMaxRowGroups(bind_data.row_groups_per_file)
+	        .WithRowGroupSize(bind_data.row_group_size)
+	        .WithInlinedFooter(bind_data.inline_footer ? fastlanes::fls_bool::FLS_TRUE : fastlanes::fls_bool::FLS_FALSE)
+	        // Enable explicit flush so we can commit to a FastLanes file in the
+	        // FlushBatch() function. This is required as PrepareBatch() can be called
+	        // out-of-order, whereas FlushBatch() enforces order across row groups.
+	        .WithExplicitFlush()
+	        .Build();
 	global_state->writer->Open();
 
 	return global_state;
