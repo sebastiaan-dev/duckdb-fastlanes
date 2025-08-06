@@ -20,6 +20,6 @@ public:
 	 *
 	 * @param db The currently running DuckDB database.
 	 */
-	static void Register(DatabaseInstance &db);
+	static void Register(DatabaseInstance& db);
 };
 } // namespace duckdb

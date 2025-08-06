@@ -1,18 +1,18 @@
-#define private   public
+#define private public
 #include "fls/reader/table_reader.hpp"
 #undef private
 #include "reader/fls_reader.hpp"
 #include "reader/translation_utils.hpp"
-
 #include <iostream>
 
 namespace duckdb {
 
-FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move(file_p)) {
+FastLanesReader::FastLanesReader(OpenFileInfo file_p)
+    : BaseFileReader(std::move(file_p)) {
 	D_ASSERT(StringUtil::EndsWith(file.path, ".fls"));
 
 	std::filesystem::path full_path = file.path;
-	table_reader = make_uniq<fastlanes::TableReader>(full_path, conn);
+	table_reader                    = make_uniq<fastlanes::TableReader>(full_path, conn);
 
 	const fastlanes::TableDescriptorT& table_metadata = *table_reader->m_table_descriptor;
 	if (table_metadata.m_rowgroup_descriptors.empty()) {
@@ -22,7 +22,7 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 	auto& column_descriptors = table_metadata.m_rowgroup_descriptors[0]->m_column_descriptors;
 
 	// Configure the schema based on the data provided by the footer
-	for (auto &column_descriptor : column_descriptors) {
+	for (auto& column_descriptor : column_descriptors) {
 		auto type = TranslateUtils::TranslateType(column_descriptor->data_type);
 		auto name = column_descriptor->name;
 
@@ -41,14 +41,13 @@ idx_t FastLanesReader::GetNRowGroups() const {
 }
 
 idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
-	const fastlanes::TableDescriptorT& table = *table_reader->m_table_descriptor;
-	auto& row_descriptors = table.m_rowgroup_descriptors;
+	const fastlanes::TableDescriptorT& table           = *table_reader->m_table_descriptor;
+	auto&                              row_descriptors = table.m_rowgroup_descriptors;
 
 	D_ASSERT(row_group_idx < row_descriptors.size());
 
 	return row_descriptors[row_group_idx]->m_n_vec;
 }
-
 
 idx_t FastLanesReader::GetNRows() const {
 	const fastlanes::TableDescriptorT& table_descriptor = *table_reader->m_table_descriptor;
@@ -65,4 +64,4 @@ fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(c
 	return table_reader->get_rowgroup_reader(rowgroup_idx);
 }
 
-}
+} // namespace duckdb
