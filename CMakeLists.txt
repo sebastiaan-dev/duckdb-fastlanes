@@ -50,7 +50,7 @@ target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 #-----------------------------------------------------------------------------------------------------------------------
 
-#add_subdirectory(benchmarks)
+add_subdirectory(benchmarks)
 
 install(
         TARGETS ${EXTENSION_NAME}
