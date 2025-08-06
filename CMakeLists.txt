@@ -20,10 +20,6 @@ set(EXTENSION_SOURCES src/fastlanes_extension.cpp
         src/reader/fls_multi_file_info.cpp
         src/reader/fls_reader.cpp
         src/reader/translation_utils.cpp
-        src/write_fls.cpp
-        src/writer/translation_utils.cpp
-        src/writer/fls_view_writer.cpp
-        src/writer/fls_writer.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
@@ -42,8 +38,8 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 
 FetchContent_Declare(
         fls_repo
-        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-        GIT_TAG update
+        GIT_REPOSITORY https://github.com/cwida/FastLanes
+        GIT_TAG dev
 )
 
 FetchContent_MakeAvailable(fls_repo)

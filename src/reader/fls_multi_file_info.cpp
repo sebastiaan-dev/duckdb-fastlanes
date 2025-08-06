@@ -202,22 +202,6 @@ void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFile
 }
 
 unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext &context, const string &name) {
-	unique_ptr<BaseStatistics> stats;
-
-	const fastlanes::TableDescriptorT table_descriptor = GetFileMetadata();
-	for (idx_t row_group_idx = 0; row_group_idx < table_descriptor.m_rowgroup_descriptors.size(); row_group_idx++) {
-		auto &row_group_descriptor = table_descriptor.m_rowgroup_descriptors[row_group_idx];
-		auto &column_descriptors = row_group_descriptor->m_column_descriptors;
-		// auto column_idx = row_group_descriptor.LookUp(name);
-		// auto &column_descriptor = column_descriptors[column_idx];
-
-		// if (column_descriptor.n_null > 0) {
-		// 	stats->SetHasNull();
-		// } else {
-		// 	stats->SetHasNoNull();
-		// }
-	}
-
 	return nullptr;
 }
 

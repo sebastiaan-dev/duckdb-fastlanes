@@ -1,5 +1,7 @@
+#define private   public
+#include "fls/reader/table_reader.hpp"
+#undef private
 #include "reader/fls_reader.hpp"
-
 #include "reader/translation_utils.hpp"
 
 #include <iostream>
@@ -12,7 +14,7 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 	std::filesystem::path full_path = file.path;
 	table_reader = make_uniq<fastlanes::TableReader>(full_path, conn);
 
-	const auto table_metadata = table_reader->get_file_metadata();
+	const fastlanes::TableDescriptorT& table_metadata = *table_reader->m_table_descriptor;
 	if (table_metadata.m_rowgroup_descriptors.empty()) {
 		throw std::runtime_error("FastLanesReader: no row-groups found in file \"" + file.path + "\"");
 	}
@@ -33,17 +35,13 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 FastLanesReader::~FastLanesReader() {
 }
 
-const fastlanes::TableDescriptorT& FastLanesReader::GetFileMetadata() const {
-	return table_reader->get_file_metadata();
-}
-
-
 idx_t FastLanesReader::GetNRowGroups() const {
-	return table_reader->get_n_rowgroups();
+	const fastlanes::TableDescriptorT& table = *table_reader->m_table_descriptor;
+	return table.m_rowgroup_descriptors.size();
 }
 
 idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
-	const fastlanes::TableDescriptorT& table = table_reader->get_file_metadata();
+	const fastlanes::TableDescriptorT& table = *table_reader->m_table_descriptor;
 	auto& row_descriptors = table.m_rowgroup_descriptors;
 
 	D_ASSERT(row_group_idx < row_descriptors.size());
@@ -53,7 +51,7 @@ idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
 
 
 idx_t FastLanesReader::GetNRows() const {
-	const fastlanes::TableDescriptorT& table_descriptor = table_reader->get_file_metadata();
+	const fastlanes::TableDescriptorT& table_descriptor = *table_reader->m_table_descriptor;
 
 	idx_t total_n_vectors = 0;
 	for (auto& row_group_descriptor : table_descriptor.m_rowgroup_descriptors) {
