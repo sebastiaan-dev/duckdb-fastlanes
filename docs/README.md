@@ -1,5 +1,5 @@
 # DuckDB FastLanes Extension
-This repository contains DuckDB extension for [FastLanes](https://github.com/cwida/FastLanes), a next generation big-data format. This extension is a work-in-progress, if you find any issues or have feedback please let us know.
+This repository contains the DuckDB extension for [FastLanes](https://github.com/cwida/FastLanes), a next generation big-data format. This extension is a work-in-progress, if you find any issues or have feedback please let us know.
 
 ## Supported platforms
 Currently the extension is not precompiled for any target.
