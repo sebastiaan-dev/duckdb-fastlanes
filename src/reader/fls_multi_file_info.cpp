@@ -167,7 +167,20 @@ void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTab
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);
-			std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() - 1]);
+			// std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() - 1]);
+
+			if (target_col.GetType() == LogicalType::VARCHAR) {
+				auto target_ptr = FlatVector::GetData<string_t>(target_col) + offset;
+				for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
+					string tmp = "hello";
+					target_ptr[idx] = StringVector::AddString(target_col, tmp);
+				}
+			} else {
+				auto target_ptr = FlatVector::GetData<double>(target_col) + offset;
+				for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
+					target_ptr[idx] = 0.0;
+				}
+			}
 		}
 	}
 

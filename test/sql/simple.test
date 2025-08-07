@@ -1,0 +1,15 @@
+# name: test/sql/all_types_multi_threaded.test
+# description: Test loading FSST
+# group: [sql]
+
+require fastlanes
+
+statement ok
+CREATE VIEW weather_view_fls AS SELECT * FROM read_fls('data/weather-big.fls');
+
+statement ok
+set threads=1;
+
+query IIIII
+summarize weather_view_fls;
+----
