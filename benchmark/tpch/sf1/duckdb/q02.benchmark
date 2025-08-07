@@ -1,0 +1,7 @@
+# name: benchmark/tpch/sf1/duckdb/q02.benchmark
+# description: Run query 02 from the TPC-H benchmark
+# group: [sf1-duckdb]
+
+template benchmark/tpch/sf1/duckdb/tpch_sf1.benchmark.in
+QUERY_NUMBER=2
+QUERY_NUMBER_PADDED=02

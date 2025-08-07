@@ -2,14 +2,14 @@
 # description: ${DESCRIPTION}
 # group: [sf1]
 
-include benchmark/tpch/tpch_load_parquet.benchmark.in
-
 name Q${QUERY_NUMBER_PADDED}
 group tpch
-subgroup sf${sf}
+subgroup sf1
 
-require tpch
+require parquet
+
+load benchmark/tpch/sf1/parquet/load.sql
 
 run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql
 
-result duckdb/extension/tpch/dbgen/answers/sf1/q${QUERY_NUMBER_PADDED}.csv sf=1
+result duckdb/extension/tpch/dbgen/answers/sf1/q${QUERY_NUMBER_PADDED}.csv
