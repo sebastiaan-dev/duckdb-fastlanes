@@ -69,7 +69,7 @@ In order to benchmark the extension first build the extension with a benchmarkin
 ```sh
 BUILD_BENCHMARK=1 make release
 ```
-Next generate the TPC-H dataset and corresponding files. Currently supported are DuckDB, Parquet and FastLanes.
+Next generate the TPC-H dataset and corresponding files. Currently supported are DuckDB, Parquet and FastLanes. Note: This runs pip commands, have a venv running before executing this command.
 ```sh
 make generate-data
 ```
