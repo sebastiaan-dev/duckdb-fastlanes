@@ -159,7 +159,6 @@ void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTab
 		const auto &expressions = local_state.row_group_reader->get_chunk(vector_idx);
 		const auto offset = batch_idx * fastlanes::CFG::VEC_SZ;
 
-		// ColumnCount is defined during the bind of the table function.
 		for (idx_t i = 0; i < column_ids.size(); i++) {
 			const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
 
@@ -167,25 +166,15 @@ void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTab
 			const auto expr = expressions[col_idx];
 
 			expr->PointTo(vector_idx);
-			// std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() - 1]);
-
-			if (target_col.GetType() == LogicalType::VARCHAR) {
-				auto target_ptr = FlatVector::GetData<string_t>(target_col) + offset;
-				for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
-					string tmp = "hello";
-					target_ptr[idx] = StringVector::AddString(target_col, tmp);
-				}
-			} else {
-				auto target_ptr = FlatVector::GetData<double>(target_col) + offset;
-				for (fastlanes::n_t idx {0}; idx < fastlanes::CFG::VEC_SZ; ++idx) {
-					target_ptr[idx] = 0.0;
-				}
-			}
+			column_decoders[col_idx]->Decode(expr->operators[expr->operators.size() - 1], target_col, offset);
+			// std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() -
+			// 1]);
 		}
 	}
 
 	chunk.SetCardinality(fastlanes::CFG::VEC_SZ * batch_size);
 	local_state.cur_vector += batch_size;
+	vectors_read += batch_size;
 }
 
 void FastLanesMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFunctionState &global_state_p,
@@ -207,7 +196,8 @@ unique_ptr<NodeStatistics> FastLanesMultiFileInfo::GetCardinality(const MultiFil
 }
 
 double FastLanesReader::GetProgressInFile(ClientContext &context) {
-	return 0;
+	const auto read_vectors = vectors_read.load();
+	return 100.0 * (static_cast<double>(read_vectors * fastlanes::CFG::VEC_SZ) / static_cast<double>(GetNRows()));
 }
 
 void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext &context, MultiFileBindData &bind_data_p,

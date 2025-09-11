@@ -4,6 +4,19 @@
 #include "fls/reader/rowgroup_reader.hpp"
 
 namespace duckdb {
+class ColumnDecoder;
+
+struct DictStateFW {
+	unique_ptr<Vector> dict_child;
+	bool built = false;
+	idx_t dict_size = 0;
+	bool can_have_nulls = false;
+	std::string dict_id;
+	SelectionVector sel;
+	DictStateFW() : sel(STANDARD_VECTOR_SIZE) {
+	}
+};
+
 struct FastLanesReadBindData final : TableFunctionData {
 	//! Number of rows in the first file, used for estimating the total cardinality of the to-be-read file(s).
 	idx_t initial_file_cardinality;
@@ -31,8 +44,8 @@ struct FastLanesMultiFileInfo : public MultiFileReaderInterface {
 	                                                                MultiFileList &file_list);
 
 	bool ParseCopyOption(ClientContext &context, const string &key, const vector<Value> &values,
-	                            BaseFileReaderOptions &options, vector<string> &expected_names,
-	                            vector<LogicalType> &expected_types) override;
+	                     BaseFileReaderOptions &options, vector<string> &expected_names,
+	                     vector<LogicalType> &expected_types) override;
 
 	unique_ptr<BaseFileReaderOptions> InitializeOptions(ClientContext &context,
 	                                                    optional_ptr<TableFunctionInfo> info) override;

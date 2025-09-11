@@ -6,6 +6,7 @@
 #include <string>
 
 namespace duckdb {
+class ColumnDecoder;
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.
  */
@@ -34,9 +35,11 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
+	atomic<idx_t> vectors_read;
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path dir_path;
 	fastlanes::Connection conn;
 	unique_ptr<fastlanes::TableReader> table_reader;
+	std::vector<unique_ptr<ColumnDecoder>> column_decoders;
 };
 } // namespace duckdb
