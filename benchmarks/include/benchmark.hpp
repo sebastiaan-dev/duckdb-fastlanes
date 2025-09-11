@@ -1,7 +1,7 @@
 #pragma once
 
 #include <filesystem>
-#include <fls/connection.hpp>
+#include "fastlanes.hpp"
 
 struct Benchmark {
 	static const std::filesystem::path base_dir;

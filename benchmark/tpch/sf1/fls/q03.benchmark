@@ -1,0 +1,7 @@
+# name: benchmark/tpch/sf1/fls/q03.benchmark
+# description: Run query 03 from the TPC-H benchmark
+# group: [sf1-fls]
+
+template benchmark/tpch/sf1/fls/tpch_sf1.benchmark.in
+QUERY_NUMBER=3
+QUERY_NUMBER_PADDED=03

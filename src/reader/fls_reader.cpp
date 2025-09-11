@@ -50,6 +50,7 @@ idx_t FastLanesReader::GetNVectors(idx_t row_group_idx) const {
 	return row_descriptors[row_group_idx]->m_n_vec;
 }
 
+
 idx_t FastLanesReader::GetNRows() const {
 	const fastlanes::TableDescriptorT &table_descriptor = *table_reader->m_table_descriptor;
 

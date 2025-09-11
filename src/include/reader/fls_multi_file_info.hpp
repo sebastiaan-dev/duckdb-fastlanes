@@ -6,17 +6,6 @@
 namespace duckdb {
 class ColumnDecoder;
 
-struct DictStateFW {
-	unique_ptr<Vector> dict_child;
-	bool built = false;
-	idx_t dict_size = 0;
-	bool can_have_nulls = false;
-	std::string dict_id;
-	SelectionVector sel;
-	DictStateFW() : sel(STANDARD_VECTOR_SIZE) {
-	}
-};
-
 struct FastLanesReadBindData final : TableFunctionData {
 	//! Number of rows in the first file, used for estimating the total cardinality of the to-be-read file(s).
 	idx_t initial_file_cardinality;

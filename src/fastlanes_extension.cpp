@@ -7,11 +7,11 @@
 
 namespace duckdb {
 
-static void LoadInternal(DatabaseInstance &instance) {
+static void LoadInternal(DatabaseInstance& instance) {
 	ReadFastLanes::Register(instance);
 }
 
-void FastlanesExtension::Load(DuckDB &db) {
+void FastlanesExtension::Load(DuckDB& db) {
 	LoadInternal(*db.instance);
 }
 std::string FastlanesExtension::Name() {
@@ -30,12 +30,12 @@ std::string FastlanesExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void fastlanes_init(duckdb::DatabaseInstance &db) {
-    duckdb::DuckDB db_wrapper(db);
-    db_wrapper.LoadExtension<duckdb::FastlanesExtension>();
+DUCKDB_EXTENSION_API void fastlanes_init(duckdb::DatabaseInstance& db) {
+	duckdb::DuckDB db_wrapper(db);
+	db_wrapper.LoadExtension<duckdb::FastlanesExtension>();
 }
 
-DUCKDB_EXTENSION_API const char *fastlanes_version() {
+DUCKDB_EXTENSION_API const char* fastlanes_version() {
 	return duckdb::DuckDB::LibraryVersion();
 }
 }

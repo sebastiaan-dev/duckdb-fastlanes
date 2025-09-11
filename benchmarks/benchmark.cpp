@@ -1,13 +1,11 @@
 #include "include/benchmark.hpp"
-
 #include "duckdb.hpp"
 #include "include/bench_duckdb_vectorbuffer.hpp"
 #include "include/bench_fsst_interface.h"
 #include "include/generate_data.hpp"
-
+#include <fastlanes.hpp>
 #include <iostream>
 #include <numeric>
-#include <fls/connection.hpp>
 #include <unordered_map>
 
 // /**
@@ -186,8 +184,8 @@ int main() {
 	// bench_source_dependent(iterations);
 
 	fastlanes::Connection conn;
-	conn.read_fls("/Users/sebastiaan/repos/bench-file-formats/synth-data/fls/data-65536-1-width-1.0.fls")->to_csv("/Users/sebastiaan/repos/bench-file-formats/test_local.csv");
-
+	conn.read_fls("/Users/sebastiaan/repos/bench-file-formats/synth-data/fls/data-65536-1-width-1.0.fls")
+	    ->to_csv("/Users/sebastiaan/repos/bench-file-formats/test_local.csv");
 
 	return 0;
 }
