@@ -30,7 +30,6 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p) : BaseFileReader(std::move
 		MultiFileColumnDefinition result(name, type);
 
 		columns.push_back(result);
-		column_decoders.push_back(make_uniq<ColumnDecoder>());
 	}
 }
 

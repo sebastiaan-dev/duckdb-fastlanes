@@ -40,6 +40,5 @@ private:
 	std::filesystem::path dir_path;
 	fastlanes::Connection conn;
 	unique_ptr<fastlanes::TableReader> table_reader;
-	std::vector<unique_ptr<ColumnDecoder>> column_decoders;
 };
 } // namespace duckdb

@@ -1,0 +1,68 @@
+{
+  "columns": [
+    {
+      "name": "l_orderkey",
+      "type": "FLS_I64"
+    },
+    {
+      "name": "l_partkey",
+      "type": "FLS_I64"
+    },
+    {
+      "name": "l_suppkey",
+      "type": "FLS_I64"
+    },
+    {
+      "name": "l_linenumber",
+      "type": "FLS_I64"
+    },
+    {
+      "name": "l_quantity",
+      "type": "FLS_DBL"
+    },
+    {
+      "name": "l_extendedprice",
+      "type": "FLS_DBL"
+    },
+    {
+      "name": "l_discount",
+      "type": "FLS_DBL"
+    },
+    {
+      "name": "l_tax",
+      "type": "FLS_DBL"
+    },
+    {
+      "name": "l_returnflag",
+      "type": "FLS_STR"
+    },
+    {
+      "name": "l_linestatus",
+      "type": "FLS_STR"
+    },
+    {
+      "name": "l_shipdate",
+      "type": "DATE"
+    },
+    {
+      "name": "l_commitdate",
+      "type": "DATE"
+    },
+    {
+      "name": "l_receiptdate",
+      "type": "DATE"
+    },
+    {
+      "name": "l_shipinstruct",
+      "type": "FLS_STR"
+    },
+    {
+      "name": "l_shipmode",
+      "type": "FLS_STR"
+    },
+    {
+      "name": "l_comment",
+      "type": "FLS_STR"
+    }
+  ]
+}

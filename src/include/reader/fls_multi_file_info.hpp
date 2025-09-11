@@ -29,6 +29,8 @@ struct FastLanesReadLocalState final : LocalTableFunctionState {
 	//! Rowgroup which is currently being processed.
 	idx_t cur_rowgroup;
 	fastlanes::up<fastlanes::RowgroupReader> row_group_reader;
+	std::vector<unique_ptr<ColumnDecoder>> column_decoders;
+	bool is_initialized = false;
 };
 
 struct FastLanesReadGlobalState final : GlobalTableFunctionState {

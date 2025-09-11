@@ -5,11 +5,18 @@
 require fastlanes
 
 statement ok
-CREATE VIEW weather_view_fls AS SELECT * FROM read_fls('data/weather-big.fls');
+create view lineitem as from read_fls('lineitem.fls');
 
 statement ok
 set threads=1;
 
 query IIIII
-summarize weather_view_fls;
+explain analyze SELECT SUM(
+   hash(
+     l_orderkey, l_partkey, l_suppkey, l_linenumber,
+     l_quantity, l_extendedprice, l_discount, l_tax,
+     l_returnflag, l_linestatus,
+     l_shipdate, l_commitdate, l_receiptdate,
+     l_shipinstruct, l_shipmode, l_comment
+   )) AS row_hash_sum FROM lineitem;
 ----

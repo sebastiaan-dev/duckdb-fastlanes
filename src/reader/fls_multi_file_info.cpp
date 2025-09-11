@@ -130,6 +130,9 @@ bool FastLanesReader::TryInitializeScan(ClientContext &, GlobalTableFunctionStat
 	local_state.cur_rowgroup = global_state.cur_rowgroup;
 
 	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
+	for (auto &_ : columns) {
+		local_state.column_decoders.push_back(make_uniq<ColumnDecoder>());
+	}
 
 	// Consume the rowgroup in the global state.
 	global_state.cur_rowgroup++;
@@ -157,19 +160,26 @@ void FastLanesReader::Scan(ClientContext &, GlobalTableFunctionState &, LocalTab
 	for (idx_t batch_idx = 0; batch_idx < batch_size; batch_idx++) {
 		const idx_t vector_idx = cur_vec + batch_idx;
 		const auto &expressions = local_state.row_group_reader->get_chunk(vector_idx);
-		const auto offset = batch_idx * fastlanes::CFG::VEC_SZ;
 
 		for (idx_t i = 0; i < column_ids.size(); i++) {
 			const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
-
 			auto &target_col = chunk.data[i];
-			const auto expr = expressions[col_idx];
 
+			const auto expr = expressions[col_idx];
 			expr->PointTo(vector_idx);
-			column_decoders[col_idx]->Decode(expr->operators[expr->operators.size() - 1], target_col, offset);
-			// std::visit(material_visitor {vector_idx, offset, target_col}, expr->operators[expr->operators.size() -
-			// 1]);
+			auto &op = expr->operators[expr->operators.size() - 1];
+
+			if (!local_state.is_initialized) {
+				local_state.column_decoders[col_idx]->Init(op, target_col);
+			}
+			if (batch_idx == 0) {
+				local_state.column_decoders[col_idx]->Decode<Pass::First>(op, target_col);
+			} else {
+				local_state.column_decoders[col_idx]->Decode<Pass::Second>(op, target_col);
+			}
 		}
+
+		local_state.is_initialized = true;
 	}
 
 	chunk.SetCardinality(fastlanes::CFG::VEC_SZ * batch_size);
