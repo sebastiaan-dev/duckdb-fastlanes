@@ -32,8 +32,9 @@ public:
 	shared_ptr<BaseUnionData>  GetUnionData(idx_t file_idx) override;
 
 	idx_t                                    GetNRowGroups() const;
-	idx_t                                    GetNRows() const;
+	idx_t                                    GetNTuples(idx_t row_group_idx) const;
 	idx_t                                    GetNVectors(idx_t row_group_idx) const;
+	idx_t                                    GetTotalTuples() const;
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
