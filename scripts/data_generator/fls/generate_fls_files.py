@@ -47,9 +47,9 @@ schemas = {
         {"name": "l_comment", "type": "FLS_STR"},
     ],
     "nation": [
-        {"name": "n_nationkey", "type": "FLS_U08"},
+        {"name": "n_nationkey", "type": "FLS_I32"},
         {"name": "n_name", "type": "FLS_STR"},
-        {"name": "n_regionkey", "type": "FLS_U08"},
+        {"name": "n_regionkey", "type": "FLS_I32"},
         {"name": "n_comment", "type": "FLS_STR"},
     ],
     "orders": [
@@ -117,14 +117,14 @@ def main():
         print("Make sure to build the project first with 'make'")
         sys.exit(1)
 
-    fls_dir = os.path.join(base_path, "fls", f"tpch_sf{args.sf}")
+    fls_dir = os.path.join(base_path, "fls", f"tpch_sf{str(args.sf).replace('.', '_')}")
     os.makedirs(fls_dir, exist_ok=True)
 
     for table in tables:
         tmpdir = f"./TMP/{table}"
         if not os.path.exists(tmpdir):
             os.makedirs(tmpdir)
-        csv_path = os.path.join(base_path, "csv", f"tpch_sf{args.sf}", f"{table}.csv")
+        csv_path = os.path.join(base_path, "csv", f"tpch_sf{str(args.sf).replace('.', '_')}", f"{table}.csv")
         if not os.path.exists(csv_path):
             print(f"Warning: CSV file not found: {csv_path}")
             continue

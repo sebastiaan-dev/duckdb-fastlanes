@@ -14,7 +14,10 @@ int main(int argc, char* argv[]) {
     
     // Create output directory if it doesn't exist
     std::filesystem::path output_path(output_file);
-    std::filesystem::create_directories(output_path.parent_path());
+	auto parent = output_path.parent_path();
+	if (!parent.empty()) {
+		std::filesystem::create_directories(parent);
+	}
     
     try {
         fastlanes::Connection conn;
