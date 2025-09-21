@@ -113,6 +113,7 @@ shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext&,
 };
 
 void FastLanesReader::PrepareReader(ClientContext& context, GlobalTableFunctionState&) {
+	EnsureRowGroupFilterState();
 }
 
 unique_ptr<GlobalTableFunctionState>
@@ -131,14 +132,15 @@ bool FastLanesReader::TryInitializeScan(ClientContext&,
 	auto& global_state = global_state_p.Cast<FastLanesReadGlobalState>();
 	auto& local_state  = local_state_p.Cast<FastLanesReadLocalState>();
 
-	// Check if there are noo more vectors left to scan.
-	if (global_state.cur_rowgroup >= GetNRowGroups()) {
+	EnsureRowGroupFilterState();
+	const auto selected_rowgroup_count = rowgroups_to_scan.size();
+	// Check if there are no more rowgroups left to scan.
+	if (global_state.cur_rowgroup >= selected_rowgroup_count) {
 		return false;
 	}
 	// Prepare the local state of the current thread by informing its processing responsibilities.
-	// TODO: put this in a reset function?
 	local_state.cur_vector       = 0;
-	local_state.cur_rowgroup     = global_state.cur_rowgroup;
+	local_state.cur_rowgroup     = rowgroups_to_scan[global_state.cur_rowgroup];
 	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
 	local_state.is_initialized   = false;
 
@@ -180,10 +182,9 @@ void FastLanesReader::Scan(ClientContext& context,
 		const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
 
 		for (idx_t i = 0; i < column_ids.size(); i++) {
-			const auto col_idx    = column_ids[MultiFileLocalIndex(i)].GetId();
 			auto&      target_col = chunk.data[i];
+			const auto expr       = expressions[i];
 
-			const auto expr = expressions[col_idx];
 			expr->PointTo(vector_idx);
 			auto& op = expr->operators[expr->operators.size() - 1];
 

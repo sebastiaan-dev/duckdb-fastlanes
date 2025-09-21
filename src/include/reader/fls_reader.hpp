@@ -1,8 +1,15 @@
 #pragma once
 
 #include "duckdb/common/multi_file/base_file_reader.hpp"
+#include "duckdb/common/types/value.hpp"
+#include "fls/footer/column_descriptor.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <mutex>
 #include <string>
+#include <vector>
 
 namespace duckdb {
 class ColumnDecoder;
@@ -38,7 +45,18 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
-	atomic<idx_t> vectors_read;
+	void InitializeRowGroupStats();
+	Value ExtractMaxValue(const fastlanes::ColumnDescriptorT& column_descriptor, const LogicalType& logical_type) const;
+	bool RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
+	void EnsureRowGroupFilterState();
+	void BuildRowGroupFilterList();
+
+private:
+	atomic<idx_t>                     vectors_read;
+	std::vector<std::vector<Value>>   rowgroup_max_values;
+	std::vector<idx_t>                rowgroups_to_scan;
+	mutable std::mutex                rowgroup_filter_lock;
+	std::atomic<bool>                 rowgroup_filters_ready {false};
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path              dir_path;
 	fastlanes::Connection              conn;

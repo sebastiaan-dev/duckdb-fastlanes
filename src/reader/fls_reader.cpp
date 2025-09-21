@@ -1,11 +1,20 @@
 #define private public
 #include "fls/reader/table_reader.hpp"
 #undef private
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/value_operations/value_operations.hpp"
+#include "duckdb/planner/filter/constant_filter.hpp"
 #include "fls/footer/datatype_generated.h"
+#include "fls/footer/footer_generated.h"
 #include "reader/fls_reader.hpp"
 #include "reader/materializer.hpp"
 #include "reader/translation_utils.hpp"
+#include <atomic>
+#include <cstring>
 #include <iostream>
+#include <limits>
+#include <mutex>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <vector>
@@ -15,6 +24,16 @@ namespace duckdb {
 namespace {
 
 using fastlanes::DataType;
+
+template <typename T>
+std::optional<T> ReadBinaryAs(const fastlanes::BinaryValueT& binary) {
+	if (binary.binary_data.size() < sizeof(T)) {
+		return std::nullopt;
+	}
+	T result;
+	std::memcpy(&result, binary.binary_data.data(), sizeof(T));
+	return result;
+}
 
 std::string DataTypeName(DataType type) {
 	return std::string(fastlanes::EnumNameDataType(type));
@@ -131,7 +150,8 @@ std::optional<DataType> PromoteType(DataType first, DataType second) {
 } // namespace
 
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
-    : BaseFileReader(std::move(file_p)) {
+    : BaseFileReader(std::move(file_p))
+    , vectors_read(0) {
 	D_ASSERT(StringUtil::EndsWith(file.path, ".fls"));
 
 	std::filesystem::path full_path = file.path;
@@ -190,6 +210,8 @@ FastLanesReader::FastLanesReader(OpenFileInfo file_p)
 		auto type = TranslateUtils::TranslateType(promoted_types[col_idx]);
 		columns.emplace_back(column_names[col_idx], type);
 	}
+
+	InitializeRowGroupStats();
 }
 
 FastLanesReader::~FastLanesReader() {
@@ -229,7 +251,228 @@ idx_t FastLanesReader::GetTotalTuples() const {
 }
 
 fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(const idx_t rowgroup_idx) {
-	return table_reader->get_rowgroup_reader(rowgroup_idx);
+	std::vector<uint32_t> projected_ids;
+	projected_ids.reserve(column_ids.size());
+
+	for (idx_t i = 0; i < column_ids.size(); i++) {
+		const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
+		projected_ids.emplace_back(col_idx);
+	}
+	return table_reader->get_rowgroup_reader(rowgroup_idx, projected_ids);
+}
+
+void FastLanesReader::InitializeRowGroupStats() {
+	const auto& table_metadata = *table_reader->m_table_descriptor;
+	const idx_t rowgroup_count = table_metadata.m_rowgroup_descriptors.size();
+	rowgroup_max_values.clear();
+	rowgroup_max_values.resize(rowgroup_count);
+
+	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_count; ++rowgroup_idx) {
+		auto& rowgroup_desc      = *table_metadata.m_rowgroup_descriptors[rowgroup_idx];
+		auto& column_descriptors = rowgroup_desc.m_column_descriptors;
+		rowgroup_max_values[rowgroup_idx].resize(column_descriptors.size());
+
+		for (idx_t col_idx = 0; col_idx < column_descriptors.size(); ++col_idx) {
+			const auto& column_descriptor = *column_descriptors[col_idx];
+			const auto& logical_type      = col_idx < columns.size() ? columns[col_idx].type : LogicalType::SQLNULL;
+			rowgroup_max_values[rowgroup_idx][col_idx] = ExtractMaxValue(column_descriptor, logical_type);
+		}
+	}
+}
+
+Value FastLanesReader::ExtractMaxValue(const fastlanes::ColumnDescriptorT& column_descriptor,
+                                       const LogicalType&                  logical_type) const {
+	if (!column_descriptor.max) {
+		return Value();
+	}
+
+	const auto& binary = column_descriptor.max->binary_data;
+	if (binary.empty()) {
+		return Value();
+	}
+
+	Value base_value;
+	switch (column_descriptor.data_type) {
+	case fastlanes::DataType::INT8: {
+		auto value = ReadBinaryAs<int8_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::TINYINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::INT16: {
+		auto value = ReadBinaryAs<int16_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::SMALLINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::INT32: {
+		auto value = ReadBinaryAs<int32_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::INTEGER(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::INT64: {
+		auto value = ReadBinaryAs<int64_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::BIGINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::UINT8: {
+		auto value = ReadBinaryAs<uint8_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::UBIGINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::UINT16: {
+		auto value = ReadBinaryAs<uint16_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::UBIGINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::UINT32: {
+		auto value = ReadBinaryAs<uint32_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::UBIGINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::UINT64: {
+		auto value = ReadBinaryAs<uint64_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::UBIGINT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::DOUBLE: {
+		auto value = ReadBinaryAs<double>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::DOUBLE(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::FLOAT: {
+		auto value = ReadBinaryAs<float>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::FLOAT(*value);
+		}
+		break;
+	}
+	case fastlanes::DataType::BOOLEAN: {
+		auto value = ReadBinaryAs<uint8_t>(*column_descriptor.max);
+		if (value) {
+			base_value = Value::BOOLEAN(*value != 0);
+		}
+		break;
+	}
+	default:
+		return Value();
+	}
+
+	if (base_value.IsNull()) {
+		return Value();
+	}
+
+	Value casted;
+	if (base_value.DefaultTryCastAs(logical_type, casted, nullptr)) {
+		return casted;
+	}
+	return Value();
+}
+
+void FastLanesReader::EnsureRowGroupFilterState() {
+	std::lock_guard<std::mutex> guard(rowgroup_filter_lock);
+	if (rowgroup_filters_ready.load()) {
+		return;
+	}
+	BuildRowGroupFilterList();
+	rowgroup_filters_ready.store(true);
+}
+
+void FastLanesReader::BuildRowGroupFilterList() {
+	rowgroups_to_scan.clear();
+	const idx_t total = GetNRowGroups();
+	if (!filters || filters->filters.empty()) {
+		rowgroups_to_scan.resize(total);
+		std::iota(rowgroups_to_scan.begin(), rowgroups_to_scan.end(), idx_t(0));
+		return;
+	}
+
+	rowgroups_to_scan.reserve(total);
+	for (idx_t rowgroup_idx = 0; rowgroup_idx < total; ++rowgroup_idx) {
+		if (RowGroupMaySatisfyFilters(rowgroup_idx)) {
+			rowgroups_to_scan.push_back(rowgroup_idx);
+		}
+	}
+}
+
+bool FastLanesReader::RowGroupMaySatisfyFilters(idx_t rowgroup_idx) {
+	if (!filters || filters->filters.empty()) {
+		return true;
+	}
+	if (rowgroup_idx >= rowgroup_max_values.size()) {
+		throw std::runtime_error("rowgroup_max_values out of range");
+	}
+
+	const auto& max_values = rowgroup_max_values[rowgroup_idx];
+	for (auto& entry : filters->filters) {
+		const idx_t local_column_id = entry.first;
+		auto&       filter          = *entry.second;
+
+		if (filter.filter_type != TableFilterType::CONSTANT_COMPARISON) {
+			continue;
+		}
+		auto& constant_filter = filter.Cast<ConstantFilter>();
+		auto  comparison_type = constant_filter.comparison_type;
+		if (comparison_type != ExpressionType::COMPARE_GREATERTHAN &&
+		    comparison_type != ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
+			continue;
+		}
+		if (local_column_id >= column_indexes.size()) {
+			continue;
+		}
+		const idx_t primary_index = column_indexes[local_column_id].GetPrimaryIndex();
+		if (primary_index >= max_values.size()) {
+			continue;
+		}
+
+		const auto& max_value = max_values[primary_index];
+		const auto& constant  = constant_filter.constant;
+		if (max_value.IsNull() || constant.IsNull()) {
+			continue;
+		}
+
+		Value max_casted;
+		Value constant_casted;
+		if (max_value.DefaultTryCastAs(constant.type(), max_casted, nullptr)) {
+			constant_casted = constant;
+		} else if (constant.DefaultTryCastAs(max_value.type(), constant_casted, nullptr)) {
+			max_casted = max_value;
+		} else {
+			continue;
+		}
+
+		bool skip_rowgroup = false;
+		switch (comparison_type) {
+		case ExpressionType::COMPARE_GREATERTHAN:
+			skip_rowgroup = ValueOperations::LessThanEquals(max_casted, constant_casted);
+			break;
+		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+			skip_rowgroup = ValueOperations::LessThan(max_casted, constant_casted);
+			break;
+		default:
+			break;
+		}
+		if (skip_rowgroup) {
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace duckdb
