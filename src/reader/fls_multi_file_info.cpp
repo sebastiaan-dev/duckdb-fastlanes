@@ -1,9 +1,11 @@
 #include "reader/fls_multi_file_info.hpp"
 #include "duckdb/logging/log_manager.hpp"
+#include "duckdb/planner/table_filter_state.hpp"
 #include "fls/expression/fsst12_expression.hpp"
 #include "fls/primitive/copy/fls_copy.hpp"
 #include "reader/fls_reader.hpp"
 #include "reader/materializer.hpp"
+#include <duckdb/execution/adaptive_filter.hpp>
 #include <fls/expression/alp_expression.hpp>
 #include <fls/expression/fsst_expression.hpp>
 #include <fls/expression/physical_expression.hpp>
@@ -15,6 +17,14 @@ unique_ptr<MultiFileReaderInterface>
 FastLanesMultiFileInfo::InitializeInterface(ClientContext& context, MultiFileReader& reader, MultiFileList& file_list) {
 	return make_uniq<FastLanesMultiFileInfo>();
 }
+
+FastLanesScanFilter::FastLanesScanFilter(ClientContext& context, idx_t filter_idx_p, TableFilter& filter_p)
+    : filter_idx(filter_idx_p)
+    , filter(filter_p)
+    , filter_state(TableFilterState::Initialize(context, filter_p)) {
+}
+
+FastLanesScanFilter::~FastLanesScanFilter() = default;
 
 bool FastLanesMultiFileInfo::ParseCopyOption(ClientContext&         context,
                                              const string&          key,
@@ -126,11 +136,18 @@ unique_ptr<LocalTableFunctionState> FastLanesMultiFileInfo::InitializeLocalState
 	return make_uniq<FastLanesReadLocalState>();
 }
 
-bool FastLanesReader::TryInitializeScan(ClientContext&,
+bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
                                         GlobalTableFunctionState& global_state_p,
                                         LocalTableFunctionState&  local_state_p) {
 	auto& global_state = global_state_p.Cast<FastLanesReadGlobalState>();
 	auto& local_state  = local_state_p.Cast<FastLanesReadLocalState>();
+
+	if (filters && !local_state.adaptive_filter && local_state.scan_filters.empty()) {
+		local_state.adaptive_filter = make_uniq<AdaptiveFilter>(*filters);
+		for (auto& [fst, snd] : filters->filters) {
+			local_state.scan_filters.emplace_back(ctx, fst, *snd);
+		}
+	}
 
 	EnsureRowGroupFilterState();
 	const auto selected_rowgroup_count = rowgroups_to_scan.size();
@@ -203,6 +220,11 @@ void FastLanesReader::Scan(ClientContext& context,
 	}
 
 	chunk.SetCardinality(count);
+
+	if (filters) {
+		ApplyFilters(chunk, *local_state.adaptive_filter, local_state.scan_filters);
+	}
+
 	local_state.cur_vector += n_vectors;
 	vectors_read += n_vectors;
 }

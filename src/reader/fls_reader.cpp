@@ -3,7 +3,9 @@
 #undef private
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/value_operations/value_operations.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
+#include "duckdb/storage/table/column_segment.hpp"
 #include "fls/footer/datatype_generated.h"
 #include "fls/footer/footer_generated.h"
 #include "reader/fls_reader.hpp"
@@ -11,11 +13,13 @@
 #include "reader/translation_utils.hpp"
 #include <atomic>
 #include <cstring>
+#include <duckdb/execution/adaptive_filter.hpp>
 #include <iostream>
 #include <limits>
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <reader/fls_multi_file_info.hpp>
 #include <sstream>
 #include <vector>
 
@@ -278,6 +282,8 @@ void FastLanesReader::InitializeRowGroupStats() {
 			rowgroup_max_values[rowgroup_idx][col_idx] = ExtractMaxValue(column_descriptor, logical_type);
 		}
 	}
+	rowgroup_filters_ready.store(false, std::memory_order_relaxed);
+	cached_filter_signature = std::numeric_limits<uintptr_t>::max();
 }
 
 Value FastLanesReader::ExtractMaxValue(const fastlanes::ColumnDescriptorT& column_descriptor,
@@ -385,13 +391,28 @@ Value FastLanesReader::ExtractMaxValue(const fastlanes::ColumnDescriptorT& colum
 	return Value();
 }
 
+uintptr_t FastLanesReader::GetFilterSignature() const {
+	if (!filters) {
+		return 0;
+	}
+	const auto* ptr       = filters.get();
+	const auto  ptr_bits  = reinterpret_cast<uintptr_t>(ptr) >> 4;
+	const auto  size_bits = static_cast<uintptr_t>(filters->filters.size()) << 1;
+	return ptr_bits ^ size_bits;
+}
+
 void FastLanesReader::EnsureRowGroupFilterState() {
+	const auto                  signature = GetFilterSignature();
 	std::lock_guard<std::mutex> guard(rowgroup_filter_lock);
-	if (rowgroup_filters_ready.load()) {
+	if (signature != cached_filter_signature) {
+		cached_filter_signature = signature;
+		rowgroup_filters_ready.store(false, std::memory_order_relaxed);
+	}
+	if (rowgroup_filters_ready.load(std::memory_order_relaxed)) {
 		return;
 	}
 	BuildRowGroupFilterList();
-	rowgroup_filters_ready.store(true);
+	rowgroup_filters_ready.store(true, std::memory_order_release);
 }
 
 void FastLanesReader::BuildRowGroupFilterList() {
@@ -473,6 +494,49 @@ bool FastLanesReader::RowGroupMaySatisfyFilters(idx_t rowgroup_idx) {
 		}
 	}
 	return true;
+}
+
+void FastLanesReader::ApplyFilters(DataChunk&                        chunk,
+                                   AdaptiveFilter&                   adaptive_filter,
+                                   std::vector<FastLanesScanFilter>& scan_filters) {
+	if (!filters || filters->filters.empty()) {
+		return;
+	}
+	idx_t count = chunk.size();
+	if (count == 0) {
+		return;
+	}
+
+	SelectionVector sel(STANDARD_VECTOR_SIZE);
+	for (idx_t i = 0; i < count; ++i) {
+		sel.set_index(i, static_cast<sel_t>(i));
+	}
+	idx_t approved = count;
+
+	const auto filter_state = adaptive_filter.BeginFilter();
+	for (idx_t i = 0; i < scan_filters.size(); i++) {
+		auto& scan_filter = scan_filters[adaptive_filter.permutation[i]];
+		auto local_idx = MultiFileLocalIndex(scan_filter.filter_idx);
+
+		UnifiedVectorFormat vdata;
+		chunk.data[local_idx.GetIndex()].ToUnifiedFormat(count, vdata);
+		ColumnSegment::FilterSelection(sel,
+		                               chunk.data[local_idx.GetIndex()],
+		                               vdata,
+		                               scan_filter.filter,
+		                               *scan_filter.filter_state,
+		                               count,
+		                               approved);
+		count = approved;
+		if (count == 0) {
+			break;
+		}
+	}
+	adaptive_filter.EndFilter(filter_state);
+
+	if (count != chunk.size()) {
+		chunk.Slice(sel, count);
+	}
 }
 
 } // namespace duckdb

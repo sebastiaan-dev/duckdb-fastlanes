@@ -2,6 +2,7 @@
 
 #include "duckdb/common/multi_file/base_file_reader.hpp"
 #include "duckdb/common/types/value.hpp"
+#include "duckdb/planner/table_filter_state.hpp"
 #include "fls/footer/column_descriptor.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
 #include <atomic>
@@ -12,6 +13,9 @@
 #include <vector>
 
 namespace duckdb {
+struct FastLanesScanFilter;
+class AdaptiveFilter;
+class ClientContext;
 class ColumnDecoder;
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.
@@ -45,18 +49,21 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
-	void InitializeRowGroupStats();
+	void  InitializeRowGroupStats();
 	Value ExtractMaxValue(const fastlanes::ColumnDescriptorT& column_descriptor, const LogicalType& logical_type) const;
-	bool RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
-	void EnsureRowGroupFilterState();
-	void BuildRowGroupFilterList();
+	bool  RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
+	void  EnsureRowGroupFilterState();
+	void  BuildRowGroupFilterList();
+	void  ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
+	uintptr_t GetFilterSignature() const;
 
 private:
-	atomic<idx_t>                     vectors_read;
-	std::vector<std::vector<Value>>   rowgroup_max_values;
-	std::vector<idx_t>                rowgroups_to_scan;
-	mutable std::mutex                rowgroup_filter_lock;
-	std::atomic<bool>                 rowgroup_filters_ready {false};
+	atomic<idx_t>                   vectors_read;
+	std::vector<std::vector<Value>> rowgroup_max_values;
+	std::vector<idx_t>              rowgroups_to_scan;
+	mutable std::mutex              rowgroup_filter_lock;
+	std::atomic<bool>               rowgroup_filters_ready {false};
+	uintptr_t                       cached_filter_signature = std::numeric_limits<uintptr_t>::max();
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path              dir_path;
 	fastlanes::Connection              conn;
