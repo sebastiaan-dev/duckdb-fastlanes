@@ -24,20 +24,9 @@
 #include <fls/expression/fsst12_expression.hpp>
 #include <fls/expression/slpatch_operator.hpp>
 #include <fls/primitive/copy/fls_copy.hpp>
-#include <iostream>
 #include <memory>
-
-#ifndef NDEBUG
-#include <iostream>
-#define DPRINT(x)                                                                                                      \
-	do {                                                                                                               \
-		std::cerr << x << '\n';                                                                                        \
-	} while (0)
-#else
-#define DPRINT(x)                                                                                                      \
-	do {                                                                                                               \
-	} while (0)
-#endif
+#include <type_traits>
+#include <utility>
 
 namespace duckdb {
 
@@ -106,13 +95,6 @@ template <Pass PASS>
 struct MaterializerNumericHelper {
 	template <typename T>
 	static T* GetDataPtr(Vector& col) {
-		const auto physical_type     = col.GetType().InternalType();
-		const auto expected_physical = GetTypeId<T>();
-		if (physical_type != expected_physical) {
-			throw ConversionException("Materializer expected vector physical type " +
-			                          EnumUtil::ToString(expected_physical) + " but found " +
-			                          EnumUtil::ToString(physical_type));
-		}
 		if constexpr (PASS == Pass::First) {
 			return FlatVector::GetData<T>(col);
 		}
@@ -121,8 +103,8 @@ struct MaterializerNumericHelper {
 	}
 
 	template <typename SRC, typename DEST>
-	static void CastAndStore(const SRC* src, DEST* dest, idx_t count) {
-		for (idx_t i = 0; i < count; ++i) {
+	static void CastAndStore(const SRC* src, DEST* dest) {
+		for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
 			DEST cast_value;
 			if (!TryCast::Operation<SRC, DEST>(src[i], cast_value, true)) {
 				throw ConversionException("Materializer cannot safely cast from physical type " +
@@ -134,22 +116,16 @@ struct MaterializerNumericHelper {
 	}
 
 	template <typename SRC>
-	static void CopyVector(const SRC* src, Vector& col, idx_t count) {
+	static void CopyVector(const SRC* src, Vector& col) {
 		const auto physical_type   = col.GetType().InternalType();
 		const auto source_physical = GetTypeId<SRC>();
 		if (physical_type == source_physical) {
 			auto dest = GetDataPtr<SRC>(col);
-			if (count == fastlanes::CFG::VEC_SZ) {
-				fastlanes::copy<SRC>(src, dest);
-			} else {
-				for (idx_t i = 0; i < count; ++i) {
-					dest[i] = src[i];
-				}
-			}
+			fastlanes::copy<SRC>(src, dest);
 			return;
 		}
 
-		DispatchNumericPhysicalType(physical_type, CopyVisitor<PASS, SRC> {src, col, count});
+		DispatchNumericPhysicalType(physical_type, CopyVisitor<PASS, SRC> {src, col});
 	}
 
 	template <typename SRC>
@@ -177,12 +153,27 @@ template <Pass PASS, typename SRC>
 struct CopyVisitor {
 	const SRC* src;
 	Vector&    col;
-	idx_t      count;
 
 	template <typename DEST>
 	void operator()() const {
+		// Unsigned integers can never exceed the max positive value of its signed equivalent.
+		if constexpr (std::is_unsigned_v<SRC> && std::is_signed_v<DEST> && sizeof(SRC) == sizeof(DEST)) {
+			auto dest = GetDataPtr<SRC>(col);
+			fastlanes::copy<SRC>(src, dest);
+			return;
+		}
+
 		auto dest = MaterializerNumericHelper<PASS>::template GetDataPtr<DEST>(col);
-		MaterializerNumericHelper<PASS>::template CastAndStore<SRC, DEST>(src, dest, count);
+		MaterializerNumericHelper<PASS>::template CastAndStore<SRC, DEST>(src, dest);
+	}
+
+	template <typename T>
+	static T* GetDataPtr(Vector& col) {
+		if constexpr (PASS == Pass::First) {
+			return FlatVector::GetData<T>(col);
+		}
+		D_ASSERT(col.GetVectorType() == VectorType::FLAT_VECTOR);
+		return FlatVector::GetData<T>(col) + fastlanes::CFG::VEC_SZ;
 	}
 };
 
@@ -218,8 +209,7 @@ struct UntransposeVisitor {
 			generated::untranspose::fallback::scalar::untranspose_i(transposed, out);
 		} else {
 			std::array<DEST, fastlanes::CFG::VEC_SZ> scratch;
-			MaterializerNumericHelper<PASS>::template CastAndStore<SRC, DEST>(
-			    transposed, scratch.data(), fastlanes::CFG::VEC_SZ);
+			MaterializerNumericHelper<PASS>::template CastAndStore<SRC, DEST>(transposed, scratch.data());
 			generated::untranspose::fallback::scalar::untranspose_i(scratch.data(), out);
 		}
 	}
@@ -336,40 +326,6 @@ inline void t_decode_rle_rangev2(const fastlanes::len_t* rle_lengths,
 		offset = 0;
 		++current_index;
 	}
-	// fastlanes::n_t needed        = 1024;
-	// fastlanes::n_t current_index = start_rle_index;
-	// fastlanes::n_t current_pos   = 0;
-	//
-	// for (fastlanes::n_t i = 0; i < start_rle_index; ++i)
-	// 	current_pos += rle_lengths[i];
-	//
-	// fastlanes::n_t offset = range_index * 1024 - current_pos;
-	//
-	// size_t entries = 0;
-	// while (needed > 0 && current_index < size) {
-	// 	fastlanes::ofs_t prev_offset = 0;
-	// 	if (current_index == 0) {
-	// 		prev_offset = 0;
-	// 	} else {
-	// 		prev_offset = rle_value_offsets[current_index - 1];
-	// 	}
-	// 	fastlanes::ofs_t cur_offset = rle_value_offsets[current_index];
-	// 	auto             length     = cur_offset - prev_offset;
-	// 	fastlanes::n_t   available  = rle_lengths[current_index] - offset;
-	// 	fastlanes::n_t   to_copy    = std::min(available, needed);
-	//
-	// 	for (fastlanes::n_t i = 0; i < to_copy; ++i) {
-	// 		// target[idx] = StringVector::AddString(target_col, reinterpret_cast<const char *>(opr->Data() + offset),
-	// 		// length);
-	// 		target[entries] = StringVector::AddString(
-	// 		    target_col, reinterpret_cast<const char*>(rle_value_bytes + prev_offset), length);
-	// 		entries++;
-	// 	}
-	//
-	// 	needed -= to_copy;
-	// 	offset = 0;
-	// 	++current_index;
-	// }
 }
 
 template <typename PT>
@@ -458,10 +414,10 @@ inline void t_decode_rle_range(const std::byte* rle_lengths,
 }
 
 struct KeepAlive : VectorBuffer {
-	fastlanes::sp<fastlanes::dec_fsst_opr> hold;
-	explicit KeepAlive(fastlanes::sp<fastlanes::dec_fsst_opr> p)
+	std::shared_ptr<void> owner;
+	explicit KeepAlive(std::shared_ptr<void> owner_p)
 	    : VectorBuffer(VectorBufferType::MANAGED_BUFFER)
-	    , hold(std::move(p)) {
+	    , owner(std::move(owner_p)) {
 	}
 };
 
@@ -511,39 +467,6 @@ struct SimpleMaterializer {
 		}
 
 		NumericHelper::template UntransposeBlock<PT>(opr->transposed_data, target_col);
-
-		// auto logical  = target_col.GetType();
-		// auto physical = logical.InternalType();
-		// std::cout << "DuckDB logical type = " << logical.ToString()
-		//           << ", physical type = " << EnumUtil::ToString(physical) << "\n";
-		//
-		// int   status;
-		// char* demangled = abi::__cxa_demangle(typeid(PT).name(), nullptr, nullptr, &status);
-		// if (status == 0 && demangled) {
-		// 	std::cout << "PT = " << demangled << "\n";
-		// 	free(demangled);
-		// } else {
-		// 	std::cout << "PT = " << typeid(PT).name() << "\n";
-		// }
-
-		// NumericHelper::template
-
-		// if constexpr (PASS == Pass::First) {
-		// 	// auto target_ptr = FlatVector::GetData<PT>(target_col);
-		// 	// generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[0]);
-		// 	auto ptr = FlatVector::GetData<PT>(target_col);
-		// 	for (idx_t row = 0; row < 1024; row++) {
-		// 		ptr[row] = 1;
-		// 	}
-		// }
-		// if constexpr (PASS == Pass::Second) {
-		// 	// auto target_ptr = FlatVector::GetData<PT>(target_col) + 1024;
-		// 	// generated::untranspose::fallback::scalar::untranspose_i(opr->transposed_data, &target_ptr[0]);
-		// 	auto ptr = FlatVector::GetData<PT>(target_col);
-		// 	for (idx_t row = 1024; row < 2048; row++) {
-		// 		ptr[row] = 1;
-		// 	}
-		// }
 	}
 
 	void operator()(const auto& opr) const {
@@ -564,28 +487,28 @@ struct MaterializeVisitor {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->Data(), target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->Data(), target_col);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_unffor_opr<PT>>& opr) const {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->Data(), target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->Data(), target_col);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_opr<PT>>& opr) const {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->decoded_arr, target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->decoded_arr, target_col);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_alp_rd_opr<PT>>& opr) const {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->glue_arr, target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->glue_arr, target_col);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_constant_opr<PT>>& opr) const {
@@ -669,8 +592,14 @@ struct MaterializeVisitor {
 			FSSTVector::SetCount(target_col, 2048);
 		}
 
-		const auto  out   = GetCompressedStringPtr(target_col);
-		const auto* bytes = reinterpret_cast<uint8_t*>(opr->fsst_bytes_segment_view.data);
+		const auto out     = GetCompressedStringPtr(target_col);
+		auto       encoded = opr->GetEncodedBytes();
+		auto*      bytes   = reinterpret_cast<const char*>(encoded.span.data());
+
+		auto& fsst_buffer = target_col.GetAuxiliary()->template Cast<VectorFSSTStringBuffer>();
+		if (encoded.owner) {
+			fsst_buffer.AddHeapReference(make_buffer<KeepAlive>(std::move(encoded.owner)));
+		}
 
 		generated::untranspose::fallback::scalar::untranspose_i(opr->offset_arr, opr->untrasposed_offset);
 
@@ -679,7 +608,7 @@ struct MaterializeVisitor {
 			const fastlanes::ofs_t end = opr->untrasposed_offset[i];
 			const fastlanes::ofs_t len = end - prev_end;
 
-			out[i] = FSSTVector::AddCompressedString(target_col, reinterpret_cast<const char*>(bytes + prev_end), len);
+			out[i] = string_t(bytes + prev_end, static_cast<uint32_t>(len));
 
 			prev_end = end;
 		}
@@ -862,7 +791,7 @@ struct MaterializeVisitor {
 			decoded[i]             = load_unaligned<KEY_PT>(rle_vals_bytes + byte_offset);
 		}
 
-		NumericHelper::template CopyVector<KEY_PT>(decoded.data(), target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<KEY_PT>(decoded.data(), target_col);
 	}
 	template <typename INDEX_PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>>& opr) const {
@@ -907,14 +836,14 @@ struct MaterializeVisitor {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->data, target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->data, target_col);
 	}
 	template <typename PT>
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_opr<PT>>& opr) const {
 		if constexpr (INIT) {
 			return;
 		}
-		NumericHelper::template CopyVector<PT>(opr->data, target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(opr->data, target_col);
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_frequency_str_opr>& opr) const {
 		if constexpr (INIT) {
@@ -968,7 +897,7 @@ struct MaterializeVisitor {
 
 		std::array<PT, fastlanes::CFG::VEC_SZ> decoded {};
 		t_decode_rle_rangev2(length, values, size, vec_idx, decoded.data());
-		NumericHelper::template CopyVector<PT>(decoded.data(), target_col, fastlanes::CFG::VEC_SZ);
+		NumericHelper::template CopyVector<PT>(decoded.data(), target_col);
 	}
 	void operator()(const fastlanes::sp<fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>>& opr) const {
 		if constexpr (INIT) {
@@ -1014,9 +943,7 @@ private:
 
 class ColumnDecoder {
 public:
-	explicit ColumnDecoder() {
-
-	};
+	explicit ColumnDecoder() {};
 
 public:
 	template <class FinalOpVariant>

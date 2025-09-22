@@ -1,5 +1,6 @@
 #pragma once
 
+#include "duckdb/common/constants.hpp"
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
@@ -20,6 +21,7 @@ struct FastLanesScanFilter {
 	FastLanesScanFilter(FastLanesScanFilter&&) = default;
 
 	idx_t                        filter_idx;
+	idx_t                        chunk_index = DConstants::INVALID_INDEX;
 	TableFilter&                 filter;
 	unique_ptr<TableFilterState> filter_state;
 };

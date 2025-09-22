@@ -6,10 +6,9 @@
 #include "fls/footer/column_descriptor.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
 #include <atomic>
-#include <cstdint>
-#include <limits>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace duckdb {
@@ -49,21 +48,23 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
-	void  InitializeRowGroupStats();
-	Value ExtractMaxValue(const fastlanes::ColumnDescriptorT& column_descriptor, const LogicalType& logical_type) const;
-	bool  RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
-	void  EnsureRowGroupFilterState();
-	void  BuildRowGroupFilterList();
-	void  ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
-	uintptr_t GetFilterSignature() const;
+	void         InitializeRowGroupStats();
+	Value        ExtractColumnStatistic(const fastlanes::ColumnDescriptorT& column_descriptor,
+	                                    const LogicalType&                  logical_type,
+	                                    const std::string&                  statistic_key) const;
+	const Value* GetRowGroupStatistic(idx_t rowgroup_idx, idx_t column_idx, const std::string& statistic_key) const;
+	bool         RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
+	void         EnsureRowGroupFilterState();
+	void         BuildRowGroupFilterList();
+	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
 
 private:
-	atomic<idx_t>                   vectors_read;
-	std::vector<std::vector<Value>> rowgroup_max_values;
-	std::vector<idx_t>              rowgroups_to_scan;
-	mutable std::mutex              rowgroup_filter_lock;
-	std::atomic<bool>               rowgroup_filters_ready {false};
-	uintptr_t                       cached_filter_signature = std::numeric_limits<uintptr_t>::max();
+	atomic<idx_t> vectors_read;
+	using ColumnStatisticMap = std::unordered_map<std::string, Value>;
+	std::vector<std::vector<ColumnStatisticMap>> rowgroup_statistics;
+	std::vector<idx_t>                           rowgroups_to_scan;
+	mutable std::mutex                           rowgroup_filter_lock;
+	std::atomic<bool>                            rowgroup_filters_ready {false};
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path              dir_path;
 	fastlanes::Connection              conn;
