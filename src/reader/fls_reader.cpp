@@ -549,8 +549,9 @@ void FastLanesReader::ApplyFilters(DataChunk&                        chunk,
 	}
 	idx_t active_count = scan_count;
 
+	const auto filter_state = adaptive_filter.BeginFilter();
 	for (idx_t i = 0; i < scan_filters.size(); i++) {
-		auto& scan_filter   = scan_filters[i];
+		auto& scan_filter   = scan_filters[adaptive_filter.permutation[i]];
 		auto& result_vector = chunk.data[scan_filter.filter_idx];
 
 		UnifiedVectorFormat vdata;
@@ -564,6 +565,7 @@ void FastLanesReader::ApplyFilters(DataChunk&                        chunk,
 		if (active_count == 0)
 			break;
 	}
+	adaptive_filter.EndFilter(filter_state);
 
 	if (active_count != scan_count) {
 		chunk.Slice(sel, active_count);
