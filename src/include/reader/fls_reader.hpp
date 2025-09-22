@@ -3,12 +3,13 @@
 #include "duckdb/common/multi_file/base_file_reader.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
-#include "fls/footer/column_descriptor.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
+#include "reader/filter_executor.hpp"
+#include "reader/row_group_filter.hpp"
+#include "reader/row_group_statistics.hpp"
+#include "reader/table_metadata.hpp"
 #include <atomic>
-#include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace duckdb {
@@ -48,23 +49,14 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
-	void         InitializeRowGroupStats();
-	Value        ExtractColumnStatistic(const fastlanes::ColumnDescriptorT& column_descriptor,
-	                                    const LogicalType&                  logical_type,
-	                                    const std::string&                  statistic_key) const;
-	const Value* GetRowGroupStatistic(idx_t rowgroup_idx, idx_t column_idx, const std::string& statistic_key) const;
-	bool         RowGroupMaySatisfyFilters(idx_t rowgroup_idx);
-	void         EnsureRowGroupFilterState();
-	void         BuildRowGroupFilterList();
+	const std::vector<idx_t>& GetRowGroupsToScan();
 	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
 
 private:
-	atomic<idx_t> vectors_read;
-	using ColumnStatisticMap = std::unordered_map<std::string, Value>;
-	std::vector<std::vector<ColumnStatisticMap>> rowgroup_statistics;
-	std::vector<idx_t>                           rowgroups_to_scan;
-	mutable std::mutex                           rowgroup_filter_lock;
-	std::atomic<bool>                            rowgroup_filters_ready {false};
+	TableMetadata      table_metadata;
+	atomic<idx_t>      vectors_read;
+	RowGroupStatistics rowgroup_statistics;
+	RowGroupFilter     rowgroup_filter_catalog;
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path              dir_path;
 	fastlanes::Connection              conn;

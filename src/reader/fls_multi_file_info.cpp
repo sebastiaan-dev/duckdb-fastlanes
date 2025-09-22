@@ -3,6 +3,7 @@
 #include "fls/expression/fsst12_expression.hpp"
 #include "reader/fls_reader.hpp"
 #include "reader/materializer.hpp"
+#include <algorithm>
 #include <duckdb/execution/adaptive_filter.hpp>
 #include <fls/expression/alp_expression.hpp>
 #include <fls/expression/fsst_expression.hpp>
@@ -19,7 +20,6 @@ FastLanesMultiFileInfo::InitializeInterface(ClientContext& context, MultiFileRea
 
 FastLanesScanFilter::FastLanesScanFilter(ClientContext& context, idx_t filter_idx_p, TableFilter& filter_p)
     : filter_idx(filter_idx_p)
-    , chunk_index(DConstants::INVALID_INDEX)
     , filter(filter_p)
     , filter_state(TableFilterState::Initialize(context, filter_p)) {
 }
@@ -123,7 +123,6 @@ shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext&,
 };
 
 void FastLanesReader::PrepareReader(ClientContext& context, GlobalTableFunctionState&) {
-	EnsureRowGroupFilterState();
 }
 
 unique_ptr<GlobalTableFunctionState>
@@ -149,8 +148,8 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 		}
 	}
 
-	EnsureRowGroupFilterState();
-	const auto selected_rowgroup_count = rowgroups_to_scan.size();
+	const auto& rowgroups_to_scan       = GetRowGroupsToScan();
+	const auto  selected_rowgroup_count = rowgroups_to_scan.size();
 	// Check if there are no more rowgroups left to scan.
 	if (global_state.cur_rowgroup >= selected_rowgroup_count) {
 		return false;
@@ -225,9 +224,7 @@ void FastLanesReader::Scan(ClientContext& context,
 
 		chunk.SetCardinality(count);
 
-		if (filters) {
-			ApplyFilters(chunk, *local_state.adaptive_filter, local_state.scan_filters);
-		}
+		FilterExecutor::Apply(chunk, local_state.adaptive_filter, local_state.scan_filters, filters.get());
 
 		local_state.cur_vector += n_vectors;
 		vectors_read += n_vectors;
