@@ -19,6 +19,11 @@ set(EXTENSION_SOURCES src/fastlanes_extension.cpp
         src/read_fls.cpp
         src/reader/fls_multi_file_info.cpp
         src/reader/fls_reader.cpp
+        src/reader/row_group_statistics.cpp
+        src/reader/row_group_filter.cpp
+        src/reader/filter_executor.cpp
+        src/reader/schema_builder.cpp
+        src/reader/table_metadata.cpp
         src/reader/translation_utils.cpp
         src/reader/fls_decode.cpp
 )
@@ -37,13 +42,15 @@ option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
 add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-FetchContent_Declare(
-        fls_repo
-        GIT_REPOSITORY https://github.com/cwida/FastLanes
-        GIT_TAG dev
-)
+set(FASTLANES_DIR "/Users/sebastiaan/repos/fls-patch-projection")
+add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
+#FetchContent_Declare(
+#        fls_repo
+#        GIT_REPOSITORY https://github.com/cwida/FastLanes
+#        GIT_TAG dev
+#)
 
-FetchContent_MakeAvailable(fls_repo)
+#FetchContent_MakeAvailable(fls_repo)
 include_directories(${fls_repo_SOURCE_DIR}/include)
 
 
