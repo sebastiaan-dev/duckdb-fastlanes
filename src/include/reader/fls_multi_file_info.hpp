@@ -3,42 +3,51 @@
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
+#include "materializer/column_decoder.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
 
 namespace duckdb {
+struct FastLanesScanFilter;
 class ColumnDecoder;
+
+class FastLanesFileReaderOptions final : public BaseFileReaderOptions {
+public:
+	explicit FastLanesFileReaderOptions() {
+	}
+
+	idx_t explicit_cardinality = 0;
+	bool  file_row_number      = false;
+};
 
 struct FastLanesReadBindData final : TableFunctionData {
 	//! Number of rows in the first file, used for estimating the total cardinality of the to-be-read file(s).
 	idx_t initial_file_cardinality;
 	//! Number of vectors in the first file, used to determine the number of threads.
 	idx_t initial_file_n_rowgroups;
-};
 
-struct FastLanesScanFilter {
-	FastLanesScanFilter(ClientContext& context, idx_t filter_idx, TableFilter& filter);
-	~FastLanesScanFilter();
-	FastLanesScanFilter(FastLanesScanFilter&&) = default;
-
-	idx_t                        filter_idx;
-	TableFilter&                 filter;
-	unique_ptr<TableFilterState> filter_state;
+	unique_ptr<FastLanesFileReaderOptions> options;
 };
 
 struct FastLanesReadLocalState final : LocalTableFunctionState {
+	//! Row group which is being scanned by the worker, used to fetch row group related metadata.
+	idx_t cur_rowgroup;
+	//! Vector in the row group that is up for decoding, starts at 0 for every row group.
 	idx_t cur_vector;
-	//! Rowgroup which is currently being processed.
-	idx_t                                    cur_rowgroup;
+	//! Local row group reader derived from a global FastLanes instance. Each local reader manages its own buffers.
 	fastlanes::up<fastlanes::RowgroupReader> row_group_reader;
-	std::vector<unique_ptr<ColumnDecoder>>   column_decoders;
-	bool                                     is_initialized = false;
-	std::vector<FastLanesScanFilter>         scan_filters;
-	unique_ptr<AdaptiveFilter>               adaptive_filter;
+	//! Column decoders provide a wrapper over decoding kernels for cross-vector column state.
+	std::vector<unique_ptr<materializer::ColumnDecoder>> column_decoders;
+	//! Container for table filters that have to be applied.
+	std::vector<FastLanesScanFilter> scan_filters;
+	//! Adaptive reordering of scan filters.
+	unique_ptr<AdaptiveFilter> adaptive_filter;
+	//!
+	std::vector<std::vector<FastLanesScanFilter*>> filters_by_col;
 };
 
 struct FastLanesReadGlobalState final : GlobalTableFunctionState {
-	//! Index of the row group within the current file that is staged for scanning.
-	idx_t cur_rowgroup;
+	//! Index into rowgroups_to_scan, indicating the row group within the current file that is staged for scanning.
+	idx_t next_rowgroup;
 };
 
 /**
