@@ -92,6 +92,41 @@ int StringRank(const DataType type) {
 	}
 }
 
+bool IsInteger(DataType t) {
+	return IsSignedInteger(t) || IsUnsignedInteger(t);
+}
+
+int BitWidth(DataType t) {
+	switch (t) {
+	case DataType::INT8:
+	case DataType::UINT8:
+		return 8;
+	case DataType::INT16:
+	case DataType::UINT16:
+		return 16;
+	case DataType::INT32:
+	case DataType::UINT32:
+		return 32;
+	case DataType::INT64:
+	case DataType::UINT64:
+		return 64;
+	default:
+		return -1;
+	}
+}
+
+std::optional<DataType> SmallestSignedAtLeastBits(int bits) {
+	if (bits <= 8)
+		return DataType::INT8;
+	if (bits <= 16)
+		return DataType::INT16;
+	if (bits <= 32)
+		return DataType::INT32;
+	if (bits <= 64)
+		return DataType::INT64;
+	return std::nullopt;
+}
+
 std::optional<DataType> PromoteType(DataType first, DataType second) {
 	if (first == DataType::INVALID) {
 		return second == DataType::INVALID ? std::nullopt : std::optional<DataType>(second);
@@ -114,6 +149,20 @@ std::optional<DataType> PromoteType(DataType first, DataType second) {
 	}
 	if (IsStringLike(first) && IsStringLike(second)) {
 		return StringRank(first) >= StringRank(second) ? first : second;
+	}
+	if (IsInteger(first) && IsInteger(second)) {
+		const DataType signed_type   = IsSignedInteger(first) ? first : second;
+		const DataType unsigned_type = IsUnsignedInteger(first) ? first : second;
+
+		const int s_bits = BitWidth(signed_type);
+		const int u_bits = BitWidth(unsigned_type);
+
+		const int needed_signed_bits = std::max(s_bits, u_bits + 1);
+
+		if (auto t = SmallestSignedAtLeastBits(needed_signed_bits)) {
+			return *t;
+		}
+		return std::nullopt;
 	}
 
 	return std::nullopt;

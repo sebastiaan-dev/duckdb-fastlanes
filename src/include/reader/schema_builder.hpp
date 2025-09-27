@@ -1,7 +1,6 @@
 #pragma once
 
 #include "duckdb/common/types.hpp"
-#include "fls/footer/footer_generated.h"
 #include <fls/footer/datatype_generated.h>
 #include <fls/footer/table_descriptor_generated.h>
 #include <string>

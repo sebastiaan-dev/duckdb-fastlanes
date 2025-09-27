@@ -4,6 +4,7 @@
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
+#include "fls_multi_file_info.hpp"
 #include "reader/filter_executor.hpp"
 #include "reader/row_group_filter.hpp"
 #include "reader/row_group_statistics.hpp"
@@ -23,6 +24,7 @@ class ColumnDecoder;
 class FastLanesReader final : public BaseFileReader {
 public:
 	explicit FastLanesReader(OpenFileInfo file_p);
+	explicit FastLanesReader(OpenFileInfo file_p, FastLanesFileReaderOptions& options);
 	~FastLanesReader() override;
 
 	std::string GetReaderType() const override {
@@ -42,6 +44,8 @@ public:
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext& context, const string& name) override;
 	shared_ptr<BaseUnionData>  GetUnionData(idx_t file_idx) override;
 
+	void AddVirtualColumn(column_t virtual_column_id) override;
+
 	idx_t                                    GetNRowGroups() const;
 	idx_t                                    GetNTuples(idx_t row_group_idx) const;
 	idx_t                                    GetNVectors(idx_t row_group_idx) const;
@@ -49,6 +53,7 @@ public:
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
+	void                      Initialize();
 	const std::vector<idx_t>& GetRowGroupsToScan();
 	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
 
