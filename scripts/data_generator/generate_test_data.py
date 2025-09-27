@@ -1,67 +1,93 @@
+from __future__ import annotations
+
+import argparse
+import shutil
+from pathlib import Path
+
 import duckdb
-import os
 
-BASE_PATH = os.path.dirname(os.path.realpath(__file__)) + "/../../data/generated"
-TMP_PATH = "/tmp"
-
-################################################
-### TPC-H
-################################################
-
-if not os.path.isdir(BASE_PATH):
-    os.makedirs(BASE_PATH)
-
-if not os.path.isdir(BASE_PATH + "/parquet"):
-    os.makedirs(BASE_PATH + "/parquet")
-
-if not os.path.isdir(BASE_PATH + "/csv"):
-    os.makedirs(BASE_PATH + "/csv")
-
-if not os.path.isdir(BASE_PATH + "/duckdb"):
-    os.makedirs(BASE_PATH + "/duckdb")
+from tpch_utils import parse_scale_list
 
 
-## TPC-H SF0
-print("Generating TPC-H SF0")
-con = duckdb.connect()
-con.query("call dbgen(sf=0);")
+BASE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "generated"
 
-con.query(f"EXPORT DATABASE '{BASE_PATH}/parquet/tpch_sf0' (FORMAT parquet);")
-# This is temporarily used as source for FastLanes conversion
-con.query(
-    f"EXPORT DATABASE '{BASE_PATH}/csv/tpch_sf0' (FORMAT csv, delimiter '|', header false, new_line '\n');"
-)
 
-con.query(f"ATTACH '{BASE_PATH}/duckdb/tpch_sf0.duckdb' AS persistent;")
-con.query("COPY FROM DATABASE memory TO persistent;")
-con.query("DETACH persistent;")
+def ensure_directories_exist() -> None:
+    for subdir in ("parquet", "csv", "duckdb"):
+        target = BASE_PATH / subdir
+        target.mkdir(parents=True, exist_ok=True)
 
-## TPC-H SF0.01
-print("Generating TPC-H SF0.01")
-con = duckdb.connect()
-con.query("call dbgen(sf=0.01);")
 
-con.query(f"EXPORT DATABASE '{BASE_PATH}/parquet/tpch_sf0_01' (FORMAT parquet);")
-# This is temporarily used as source for FastLanes conversion
-con.query(
-    f"EXPORT DATABASE '{BASE_PATH}/csv/tpch_sf0_01' (FORMAT csv, delimiter '|', header false, new_line '\n');"
-)
+def remove_if_exists(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
 
-con.query(f"ATTACH '{BASE_PATH}/duckdb/tpch_sf0_01.duckdb' AS persistent;")
-con.query("COPY FROM DATABASE memory TO persistent;")
-con.query("DETACH persistent;")
 
-## TPC-H SF1
-print("Generating TPC-H SF1")
-con = duckdb.connect()
-con.query("call dbgen(sf=1);")
+def export_tpch_scale(scale) -> None:
+    dataset_name = scale.dataset_name
+    parquet_path = BASE_PATH / "parquet" / dataset_name
+    csv_path = BASE_PATH / "csv" / dataset_name
+    duckdb_path = BASE_PATH / "duckdb" / f"{dataset_name}.duckdb"
 
-con.query(f"EXPORT DATABASE '{BASE_PATH}/parquet/tpch_sf1' (FORMAT parquet);")
-# This is temporarily used as source for FastLanes conversion
-con.query(
-    f"EXPORT DATABASE '{BASE_PATH}/csv/tpch_sf1' (FORMAT csv, delimiter '|', header false, new_line '\n');"
-)
+    print(f"Generating TPC-H {scale.display_name}")
 
-con.query(f"ATTACH '{BASE_PATH}/duckdb/tpch_sf1.duckdb' AS persistent;")
-con.query("COPY FROM DATABASE memory TO persistent;")
-con.query("DETACH persistent;")
+    remove_if_exists(parquet_path)
+    remove_if_exists(csv_path)
+    remove_if_exists(duckdb_path)
+
+    parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+
+    con = duckdb.connect()
+    try:
+        con.execute(f"CALL dbgen(sf={scale.normalized});")
+        con.execute(f"EXPORT DATABASE '{parquet_path}' (FORMAT parquet);")
+        con.execute(
+            "EXPORT DATABASE '{}' (FORMAT csv, delimiter '|', header false, new_line '\n');".format(
+                csv_path
+            )
+        )
+        con.execute(f"ATTACH '{duckdb_path}' AS persistent;")
+        con.execute("COPY FROM DATABASE memory TO persistent;")
+        con.execute("DETACH persistent;")
+    finally:
+        con.close()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate TPC-H datasets for the requested scale factors")
+    parser.add_argument(
+        "--scale-factors",
+        "-s",
+        nargs="+",
+        help="List of scale factors to generate (e.g. 0.01 1 10)",
+    )
+    parser.add_argument(
+        "--sf",
+        dest="scale_factors_repeat",
+        action="append",
+        help="Scale factor to generate (can be repeated)",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    factors = []
+    if args.scale_factors:
+        factors.extend(args.scale_factors)
+    if args.scale_factors_repeat:
+        factors.extend(args.scale_factors_repeat)
+
+    scales = parse_scale_list(factors or None, default=["1"])
+
+    ensure_directories_exist()
+    for scale in scales:
+        export_tpch_scale(scale)
+
+
+if __name__ == "__main__":
+    main()

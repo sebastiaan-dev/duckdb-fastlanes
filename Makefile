@@ -1,5 +1,7 @@
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+TPCH_SCALE_FACTORS ?= 1
+
 # Configuration of extension
 EXT_NAME=fastlanes
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
@@ -14,9 +16,10 @@ include extension-ci-tools/makefiles/duckdb_extension.Makefile
 include benchmark/Makefile
 
 build-fls-generator:
-	cmake --build /Users/sebastiaan/repos/duckdb-fastlanes/build/release --target generate_fls -j 8
+	cmake --build build/release --target generate_fls -j 8
 
 generate-data: build-fls-generator
 	python3 -m pip install duckdb
-	python3 scripts/data_generator/generate_test_data.py
-	python3 scripts/data_generator/fls/generate_fls_files.py
+	python3 scripts/data_generator/generate_test_data.py --scale-factors $(TPCH_SCALE_FACTORS)
+	python3 scripts/data_generator/fls/generate_fls_files.py --scale-factors $(TPCH_SCALE_FACTORS)
+	python3 scripts/data_generator/generate_tpch_benchmarks.py --scale-factors $(TPCH_SCALE_FACTORS)

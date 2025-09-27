@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-import subprocess
-import os
-import sys
-import argparse
-import shutil
-import json
+from __future__ import annotations
 
-# TPC-H tables
-tables = [
-    "customer",
-    "lineitem",
-    "nation",
-    "orders",
-    "part",
-    "partsupp",
-    "region",
-    "supplier",
-]
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DATA_GENERATOR_DIR = SCRIPT_DIR.parent
+PROJECT_ROOT = DATA_GENERATOR_DIR.parent.parent
+
+if str(DATA_GENERATOR_DIR) not in sys.path:
+    sys.path.insert(0, str(DATA_GENERATOR_DIR))
+
+from tpch_utils import TPCH_TABLES, parse_scale_list  # noqa: E402
+
 schemas = {
     "customer": [
         {"name": "c_custkey", "type": "FLS_I64"},
@@ -97,69 +98,90 @@ schemas = {
     ],
 }
 
-DATA_DIR = "data/generated"
-BUILD_DIR = "build/release"
-BIN = "extension/fastlanes/scripts/data_generator/fls/generate_fls"
+DATA_DIR = PROJECT_ROOT / "data" / "generated"
+BUILD_DIR = PROJECT_ROOT / "build" / "release"
+GENERATE_FLS_BINARY = BUILD_DIR / "extension/fastlanes/scripts/data_generator/fls/generate_fls"
+
+
+def resolve_generate_fls_binary() -> Path:
+    if not GENERATE_FLS_BINARY.exists():
+        print(f"Error: generate_fls executable not found at {GENERATE_FLS_BINARY}")
+        print("Make sure to build the project first with 'make'")
+        sys.exit(1)
+    return GENERATE_FLS_BINARY
+
+
+def convert_scale(scale, generate_fls_binary: Path) -> None:
+    print(f"Converting CSV to FastLanes for {scale.display_name}")
+    csv_base = DATA_DIR / "csv" / scale.dataset_name
+    if not csv_base.is_dir():
+        raise FileNotFoundError(f"CSV data not found for {scale.display_name} at {csv_base}")
+
+    fls_dir = DATA_DIR / "fls" / scale.dataset_name
+    if fls_dir.exists():
+        shutil.rmtree(fls_dir)
+    fls_dir.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory(prefix=f"fls_{scale.slug}_") as tmp_root:
+        tmp_root_path = Path(tmp_root)
+        for table in TPCH_TABLES:
+            table_dir = tmp_root_path / table
+            table_dir.mkdir(parents=True, exist_ok=True)
+
+            csv_path = csv_base / f"{table}.csv"
+            if not csv_path.exists():
+                raise FileNotFoundError(f"CSV file missing for table '{table}' at {csv_path}")
+
+            shutil.copyfile(csv_path, table_dir / f"{table}.csv")
+
+            schema = {
+                "columns": [
+                    {"name": col["name"], "type": col["type"]} for col in schemas[table]
+                ]
+            }
+            (table_dir / "schema.json").write_text(json.dumps(schema))
+
+            fls_path = fls_dir / f"{table}.fls"
+            print(f"  - {table}")
+            subprocess.run(
+                [str(generate_fls_binary), str(table_dir), str(fls_path)],
+                check=True,
+                text=True,
+            )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Convert CSV data to FastLanes format for the requested scale factors"
+    )
+    parser.add_argument(
+        "--scale-factors",
+        "-s",
+        nargs="+",
+        help="List of scale factors to convert (e.g. 0.01 1 10)",
+    )
+    parser.add_argument(
+        "--sf",
+        dest="scale_factors_repeat",
+        action="append",
+        help="Scale factor to convert (can be repeated)",
+    )
+    return parser.parse_args()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Parquet files to FLS format")
-    parser.add_argument("--sf", default="1", help="Scale factor (default: 1)")
-    args = parser.parse_args()
+    args = parse_args()
+    factors: list[str] = []
+    if args.scale_factors:
+        factors.extend(args.scale_factors)
+    if args.scale_factors_repeat:
+        factors.extend(args.scale_factors_repeat)
 
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
-    base_path = os.path.join(project_root, DATA_DIR)
-    generate_fls_path = os.path.join(project_root, BUILD_DIR, BIN)
+    scales = parse_scale_list(factors or None, default=["1"])
+    generate_fls_binary = resolve_generate_fls_binary()
 
-    if not os.path.exists(generate_fls_path):
-        print(f"Error: generate_fls executable not found at {generate_fls_path}")
-        print("Make sure to build the project first with 'make'")
-        sys.exit(1)
-
-    fls_dir = os.path.join(base_path, "fls", f"tpch_sf{str(args.sf).replace('.', '_')}")
-    os.makedirs(fls_dir, exist_ok=True)
-
-    for table in tables:
-        tmpdir = f"./TMP/{table}"
-        if not os.path.exists(tmpdir):
-            os.makedirs(tmpdir)
-        csv_path = os.path.join(base_path, "csv", f"tpch_sf{str(args.sf).replace('.', '_')}", f"{table}.csv")
-        if not os.path.exists(csv_path):
-            print(f"Warning: CSV file not found: {csv_path}")
-            continue
-
-        tmp_csv_path = os.path.join(tmpdir, f"{table}.csv")
-        shutil.copyfile(csv_path, tmp_csv_path)
-
-        tmp_schema_path = os.path.join(tmpdir, "schema.json")
-        if table not in schemas:
-            print(f"Warning: Schema not defined for table: {table}")
-            continue
-        schema = {
-            "columns": [
-                {"name": col["name"], "type": col["type"]} for col in schemas[table]
-            ]
-        }
-        with open(tmp_schema_path, mode="w") as schemafile:
-            schemafile.write(json.dumps(schema))
-
-        fls_path = os.path.join(fls_dir, f"{table}.fls")
-
-        print(f"Converting {table} to FLS format...")
-        result = subprocess.run(
-            [generate_fls_path, tmpdir, fls_path],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            print(f"Successfully converted {table} to FLS format")
-        else:
-            print(f"Error converting {table}: {result.stderr}")
-            print(f"Command output: {result.stdout}")
-
-    shutil.rmtree("TMP")
+    for scale in scales:
+        convert_scale(scale, generate_fls_binary)
 
 
 if __name__ == "__main__":
