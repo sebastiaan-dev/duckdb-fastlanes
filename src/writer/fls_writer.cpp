@@ -1,10 +1,14 @@
 
 
 #include "writer/fls_writer.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
+#include "duckdb/common/types/decimal.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "writer/fls_view_writer.hpp"
 #include "writer/translation_utils.hpp"
+
+#include "fls/footer/decimal_type_generated.h"
 
 namespace duckdb {
 
@@ -249,7 +253,23 @@ FastLanesFileWriter::InitGlobal(ClientContext& context, FunctionData& bind_data_
 		auto col = make_uniq<fastlanes::ColumnDescriptorT>();
 
 		col->name      = bind_data.names.at(i);
-		col->data_type = WriterTranslateUtils::TranslateType(bind_data.types.at(i));
+		const auto &logical_type = bind_data.types.at(i);
+		col->data_type          = WriterTranslateUtils::TranslateType(logical_type);
+
+		if (logical_type.id() == LogicalTypeId::DECIMAL) {
+			auto width = DecimalType::GetWidth(logical_type);
+			auto scale = DecimalType::GetScale(logical_type);
+			if (width > Decimal::MAX_WIDTH_INT64) {
+				throw NotImplementedException(
+				    "FastLanesWriter: DECIMAL width %d exceeds the supported INT64-backed precision (%d)", width,
+				    Decimal::MAX_WIDTH_INT64);
+			}
+
+			auto decimal_info = make_uniq<fastlanes::DecimalTypeT>();
+			decimal_info->precision = width;
+			decimal_info->scale     = scale;
+			col->fix_me_decimal_type = std::move(decimal_info);
+		}
 
 		descriptors.push_back(std::move(col));
 	}

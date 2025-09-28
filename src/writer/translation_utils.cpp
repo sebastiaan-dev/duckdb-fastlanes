@@ -26,6 +26,19 @@ fastlanes::DataType WriterTranslateUtils::TranslateType(const LogicalType& type)
 		return fastlanes::DataType::UINT32;
 	case LogicalTypeId::UBIGINT:
 		return fastlanes::DataType::UINT64;
+	case LogicalTypeId::DECIMAL:
+		switch (type.InternalType()) {
+		case PhysicalType::INT16:
+			return fastlanes::DataType::INT16;
+		case PhysicalType::INT32:
+			return fastlanes::DataType::INT32;
+		case PhysicalType::INT64:
+			return fastlanes::DataType::INT64;
+		case PhysicalType::INT128:
+			return fastlanes::DataType::FLS_STR;
+		default:
+			throw InternalException("Internal type not recognized for Decimal");
+		}
 	case LogicalTypeId::HUGEINT:
 		return fastlanes::DataType::FLS_STR;
 	case LogicalTypeId::UHUGEINT:
