@@ -26,6 +26,11 @@ set(EXTENSION_SOURCES src/fastlanes_extension.cpp
         src/reader/table_metadata.cpp
         src/reader/translation_utils.cpp
         src/reader/fls_decode.cpp
+
+        src/write_fls.cpp
+        src/writer/fls_view_writer.cpp
+        src/writer/fls_writer.cpp
+        src/writer/translation_utils.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

@@ -4,11 +4,13 @@
 #include "duckdb.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include "read_fls.hpp"
+#include "write_fls.hpp"
 
 namespace duckdb {
 
 static void LoadInternal(DatabaseInstance& instance) {
 	ReadFastLanes::Register(instance);
+	WriteFastLanes::Register(instance);
 }
 
 void FastlanesExtension::Load(DuckDB& db) {
