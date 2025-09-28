@@ -98,7 +98,7 @@ schemas = {
     ],
 }
 
-DATA_DIR = PROJECT_ROOT / "data" / "generated"
+DATA_DIR = PROJECT_ROOT / "benchmark" / "data" / "generated"
 BUILD_DIR = PROJECT_ROOT / "build" / "release"
 GENERATE_FLS_BINARY = BUILD_DIR / "extension/fastlanes/scripts/data_generator/fls/generate_fls"
 

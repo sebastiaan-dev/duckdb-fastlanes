@@ -9,7 +9,9 @@ import duckdb
 from tpch_utils import parse_scale_list
 
 
-BASE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "generated"
+BASE_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "benchmark" / "data" / "generated"
+)
 
 
 def ensure_directories_exist() -> None:

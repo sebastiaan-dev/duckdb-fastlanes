@@ -9,52 +9,67 @@ from textwrap import dedent
 from tpch_utils import TPCH_QUERY_NUMBERS, TPCH_TABLES, parse_scale_list
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BENCHMARK_ROOT = PROJECT_ROOT / "benchmark" / "tpch"
+BENCHMARK_ROOT = PROJECT_ROOT / "benchmark" / "queries" / "tpch"
 ANSWERS_ROOT = PROJECT_ROOT / "duckdb" / "extension" / "tpch" / "dbgen" / "answers"
 
 FORMAT_CONFIGS = {
     "fls": {
         "require": "fastlanes",
         "load": True,
-        "load_line": "create view {table} as from read_fls('./data/generated/fls/{dataset_name}/{table}.fls');",
+        "load_line": "create view {table} as from read_fls('./benchmark/data/generated/fls/{dataset_name}/{table}.fls');",
         "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
     },
     "parquet": {
         "require": "parquet",
         "load": True,
-        "load_line": "create view {table} as from parquet_scan('./data/generated/parquet/{dataset_name}/{table}.parquet');",
+        "load_line": "create view {table} as from parquet_scan('./benchmark/data/generated/parquet/{dataset_name}/{table}.parquet');",
         "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
     },
     "duckdb": {
-        "require": "tpch",
-        "load": False,
-        "run_block": dedent(
-            """
-            run
-            attach './data/generated/duckdb/{dataset_name}.duckdb' as tpch;
-            use tpch;
-            pragma tpch(${QUERY_NUMBER});
-
-            cleanup
-            use memory;
-            detach tpch;
-            """
-        ).strip(),
+        "load": True,
+        "load_lines": [
+            "attach './benchmark/data/generated/duckdb/{dataset_name}.duckdb' as tpch_db;",
+        ],
+        "load_table_template": "create or replace view {table} as select * from tpch_db.{table};",
+        "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
+        "cleanup_lines": [
+            "use memory;",
+        ],
+        "cleanup_finalize_lines": [
+            "detach tpch_db;",
+        ],
     },
 }
 
-
 def build_load_sql(scale, fmt_config) -> str:
-    line_template = fmt_config["load_line"]
-    lines = [
-        line_template.format(table=table, dataset_name=scale.dataset_name)
-        for table in TPCH_TABLES
-    ]
-    return "\n".join(lines) + "\n"
+    lines: list[str] = []
+    if "load_lines" in fmt_config:
+        lines.extend(
+            line.format(dataset_name=scale.dataset_name)
+            for line in fmt_config["load_lines"]
+        )
+    if "load_line" in fmt_config:
+        line_template = fmt_config["load_line"]
+        lines.extend(
+            line_template.format(table=table, dataset_name=scale.dataset_name)
+            for table in TPCH_TABLES
+        )
+    if "load_table_template" in fmt_config:
+        table_template = fmt_config["load_table_template"]
+        lines.extend(
+            table_template.format(table=table, dataset_name=scale.dataset_name)
+            for table in TPCH_TABLES
+        )
+    if "load_lines_after" in fmt_config:
+        lines.extend(
+            line.format(dataset_name=scale.dataset_name)
+            for line in fmt_config["load_lines_after"]
+        )
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def build_template(scale, fmt_name, fmt_config, answers_available: bool) -> str:
-    require_clause = fmt_config["require"]
+    require_clause = fmt_config.get("require")
 
     run_block_template = fmt_config["run_block"].strip("\n")
     if "{dataset_name}" in run_block_template:
@@ -76,16 +91,35 @@ def build_template(scale, fmt_name, fmt_config, answers_available: bool) -> str:
         "group tpch",
         f"subgroup {scale.group_tag}",
         "",
-        f"require {require_clause}",
-        "",
     ]
 
+    if require_clause:
+        lines.append(f"require {require_clause}")
+        lines.append("")
+
     if fmt_config["load"]:
-        lines.append(f"load benchmark/tpch/{scale.group_tag}/{fmt_name}/load.sql")
+        lines.append(f"load benchmark/queries/tpch/{scale.group_tag}/{fmt_name}/load.sql")
         lines.append("")
 
     lines.extend(run_block.splitlines())
     lines.append("")
+    cleanup_section: list[str] = []
+    # if "cleanup_lines" in fmt_config:
+    #     cleanup_section.extend(
+    #         line.format(dataset_name=scale.dataset_name)
+    #         for line in fmt_config["cleanup_lines"]
+    #     )
+    # if "cleanup_finalize_lines" in fmt_config:
+    #     cleanup_section.extend(
+    #         line.format(dataset_name=scale.dataset_name)
+    #         for line in fmt_config["cleanup_finalize_lines"]
+    #     )
+
+    if cleanup_section:
+        lines.append("cleanup")
+        lines.extend(cleanup_section)
+        lines.append("")
+
     lines.append(result_line)
 
     return "\n".join(lines) + "\n"
@@ -93,9 +127,9 @@ def build_template(scale, fmt_name, fmt_config, answers_available: bool) -> str:
 
 def build_query_file(scale, fmt_name, query_number) -> str:
     query_number_padded = f"{query_number:02d}"
-    path = f"benchmark/tpch/{scale.group_tag}/{fmt_name}/q{query_number_padded}.benchmark"
+    path = f"benchmark/queries/tpch/{scale.group_tag}/{fmt_name}/q{query_number_padded}.benchmark"
     description = f"Run query {query_number_padded} from the TPC-H benchmark"
-    template_path = f"benchmark/tpch/{scale.group_tag}/{fmt_name}/tpch_{scale.group_tag}.benchmark.in"
+    template_path = f"benchmark/queries/tpch/{scale.group_tag}/{fmt_name}/tpch_{scale.group_tag}.benchmark.in"
     content = dedent(
         f"""
         # name: {path}

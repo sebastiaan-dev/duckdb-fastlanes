@@ -19,3 +19,6 @@ flake.nix
 flake.nix.*
 flake.lock
 
+benchmark/data/
+benchmark/queries/
+benchmark/results/
