@@ -46,6 +46,13 @@ void FastLanesReader::Initialize() {
 
 	columns.reserve(column_names.size());
 	for (idx_t col_idx = 0; col_idx < column_names.size(); ++col_idx) {
+		// If we are dealing with a decimal column we skip the promoted type.
+		if (const auto& dtype =
+		        descriptor.m_rowgroup_descriptors[0]->m_column_descriptors[col_idx]->fix_me_decimal_type) {
+			columns.emplace_back(column_names[col_idx], LogicalType::DECIMAL(dtype->precision, dtype->scale));
+			continue;
+		}
+
 		auto type = TranslateUtils::TranslateType(promoted_types[col_idx]);
 		columns.emplace_back(column_names[col_idx], type);
 	}
