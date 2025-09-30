@@ -11,6 +11,13 @@
 namespace duckdb {
 class ColumnDefinition;
 
+enum class StatKey : uint8_t { None = 0, Min = 1, Max = 2 };
+
+struct ColumnStats {
+	Value min;
+	Value max;
+};
+
 class RowGroupStatistics {
 public:
 	using ColumnStatisticMap = std::unordered_map<std::string, Value>;
@@ -20,19 +27,30 @@ public:
 	void Initialize(const fastlanes::TableDescriptorT&       table_descriptor,
 	                const vector<MultiFileColumnDefinition>& definitions);
 
-	const Value* GetStatistic(idx_t rowgroup_idx, idx_t column_idx, const std::string& statistic_key) const;
+	const Value* GetStatistic(idx_t rowgroup_idx, idx_t column_idx, StatKey key) const;
+
+	const ColumnStats* GetStats(const idx_t rowgroup_idx, const idx_t column_idx) const {
+		if (rowgroup_idx >= stats_.size()) {
+			return nullptr;
+		}
+		const auto& cols = stats_[rowgroup_idx];
+		if (column_idx >= cols.size()) {
+			return nullptr;
+		}
+		return &cols[column_idx];
+	}
 
 	idx_t RowGroupCount() const {
-		return rowgroup_statistics.size();
+		return stats_.size();
 	}
 
 private:
 	Value ExtractColumnStatistic(const fastlanes::ColumnDescriptorT& column_descriptor,
 	                             const LogicalType&                  logical_type,
-	                             const std::string&                  statistic_key) const;
+	                             StatKey                             statistic_key) const;
 
 private:
-	std::vector<std::vector<ColumnStatisticMap>> rowgroup_statistics;
+	std::vector<std::vector<ColumnStats>> stats_;
 };
 
 } // namespace duckdb

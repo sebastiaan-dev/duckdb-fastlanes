@@ -81,22 +81,22 @@ bool RowGroupFilter::RowGroupMaySatisfyFilters(idx_t rowgroup_idx) const {
 			continue;
 		}
 
-		auto&       constant_filter = filter.Cast<ConstantFilter>();
-		auto        comparison_type = constant_filter.comparison_type;
-		const char* statistic_key   = nullptr;
+		auto&   constant_filter = filter.Cast<ConstantFilter>();
+		auto    comparison_type = constant_filter.comparison_type;
+		StatKey statistic_key   = StatKey::None;
 		switch (comparison_type) {
 		case ExpressionType::COMPARE_GREATERTHAN:
 		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-			statistic_key = "max";
+			statistic_key = StatKey::Max;
 			break;
 		case ExpressionType::COMPARE_LESSTHAN:
 		case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-			statistic_key = "min";
+			statistic_key = StatKey::Min;
 			break;
 		default:
 			break;
 		}
-		if (!statistic_key) {
+		if (statistic_key == StatKey::None) {
 			continue;
 		}
 		if (local_column_id >= column_indexes_ref->size()) {
