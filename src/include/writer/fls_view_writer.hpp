@@ -48,16 +48,6 @@ private:
 	vector<string> buf;
 };
 
-struct DecimalViewWriterFactory final : ViewWriterFactoryBase {
-public:
-	explicit DecimalViewWriterFactory(PhysicalType physical_type);
-	unique_ptr<fastlanes::ColumnWriteView> Build(Vector& src, idx_t count) override;
-
-private:
-	PhysicalType    physical_type;
-	vector<int64_t> buf;
-};
-
 unique_ptr<ViewWriterFactoryBase> MakeViewWriterFactory(const PhysicalType& type);
 
 } // namespace duckdb
