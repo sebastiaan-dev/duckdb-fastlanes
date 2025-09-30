@@ -208,12 +208,16 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 
 	// Do an initial pass to initialize the column decoders with the correct state.
 	for (idx_t i {0}; i < column_ids.size(); ++i) {
-		auto        type        = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
+		auto&       type        = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
 		const auto& expressions = local_state.row_group_reader->get_chunk(0);
 		const auto  expr        = expressions[i];
 		expr->PointTo(0);
 		auto& op = expr->operators[expr->operators.size() - 1];
-		local_state.column_decoders[i]->Init(op, type, &local_state.filters_by_col[i]);
+		if (filters) {
+			local_state.column_decoders[i]->Init(op, type, &local_state.filters_by_col[i]);
+		} else {
+			local_state.column_decoders[i]->Init(op, type, nullptr);
+		}
 	}
 
 	// Mark the row group as consumed.
