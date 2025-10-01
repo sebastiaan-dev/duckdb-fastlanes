@@ -15,14 +15,12 @@ namespace duckdb {
 
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
     : BaseFileReader(std::move(file_p))
-    , table_metadata(file.path)
     , vectors_read(0) {
 	Initialize();
 }
 
 FastLanesReader::FastLanesReader(OpenFileInfo file_p, FastLanesFileReaderOptions& options)
     : BaseFileReader(std::move(file_p))
-    , table_metadata(file.path)
     , vectors_read(0) {
 	Initialize();
 
@@ -37,10 +35,9 @@ FastLanesReader::~FastLanesReader() {
 }
 
 void FastLanesReader::Initialize() {
-	std::filesystem::path full_path = file.path;
-	table_reader                    = make_uniq<fastlanes::TableReader>(full_path, conn);
+	table_metadata = make_uniq<TableMetadata>(file.path);
 
-	const auto&         descriptor = table_metadata.Descriptor();
+	const auto&         descriptor = table_metadata->Descriptor();
 	const SchemaBuilder schema_builder(descriptor, file.path);
 	auto [column_names, promoted_types] = schema_builder.Build();
 
@@ -57,6 +54,11 @@ void FastLanesReader::Initialize() {
 		columns.emplace_back(column_names[col_idx], type);
 	}
 
+	for (idx_t rowgroup_idx = 0; rowgroup_idx < table_metadata->RowGroupCount(); ++rowgroup_idx) {
+		total_tuples += table_metadata->RowGroupDescriptor(rowgroup_idx).m_n_tuples;
+		total_vectors += table_metadata->RowGroupDescriptor(rowgroup_idx).m_n_vec;
+	}
+
 	rowgroup_statistics.Initialize(descriptor, columns);
 }
 
@@ -69,25 +71,25 @@ void FastLanesReader::AddVirtualColumn(column_t virtual_column_id) {
 }
 
 idx_t FastLanesReader::GetNRowGroups() const {
-	return table_metadata.RowGroupCount();
+	return table_metadata->RowGroupCount();
 }
 
 idx_t FastLanesReader::GetNVectors(const idx_t row_group_idx) const {
-	const auto& rowgroup_descriptor = table_metadata.RowGroupDescriptor(row_group_idx);
+	const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(row_group_idx);
 	return rowgroup_descriptor.m_n_vec;
 }
 
 idx_t FastLanesReader::GetNTuples(const idx_t row_group_idx) const {
-	const auto& rowgroup_descriptor = table_metadata.RowGroupDescriptor(row_group_idx);
+	const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(row_group_idx);
 	return rowgroup_descriptor.m_n_tuples;
 }
 
-idx_t FastLanesReader::GetTotalTuples() const {
-	idx_t total_n_tuples = 0;
-	for (idx_t rowgroup_idx = 0; rowgroup_idx < table_metadata.RowGroupCount(); ++rowgroup_idx) {
-		total_n_tuples += table_metadata.RowGroupDescriptor(rowgroup_idx).m_n_tuples;
-	}
-	return total_n_tuples;
+size_t FastLanesReader::GetTotalTuples() const {
+	return total_tuples;
+}
+
+size_t FastLanesReader::GetTotalVectors() const {
+	return total_vectors;
 }
 
 fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(const idx_t rowgroup_idx) {
@@ -101,7 +103,8 @@ fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(c
 		// }
 		projected_ids.emplace_back(col_idx);
 	}
-	return table_reader->get_rowgroup_reader(rowgroup_idx, projected_ids);
+
+	return table_metadata->TableReader().get_rowgroup_reader(rowgroup_idx, projected_ids);
 }
 
 const std::vector<idx_t>& FastLanesReader::GetRowGroupsToScan() {

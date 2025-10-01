@@ -49,7 +49,8 @@ public:
 	idx_t                                    GetNRowGroups() const;
 	idx_t                                    GetNTuples(idx_t row_group_idx) const;
 	idx_t                                    GetNVectors(idx_t row_group_idx) const;
-	idx_t                                    GetTotalTuples() const;
+	size_t                                   GetTotalTuples() const;
+	size_t                                   GetTotalVectors() const;
 	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
 
 private:
@@ -58,13 +59,13 @@ private:
 	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
 
 private:
-	TableMetadata      table_metadata;
-	atomic<idx_t>      vectors_read;
-	RowGroupStatistics rowgroup_statistics;
-	RowGroupFilter     rowgroup_filter_catalog;
+	size_t                    total_vectors;
+	size_t                    total_tuples;
+	unique_ptr<TableMetadata> table_metadata;
+	atomic<idx_t>             vectors_read;
+	RowGroupStatistics        rowgroup_statistics;
+	RowGroupFilter            rowgroup_filter_catalog;
 	//! Path of the directory containing both the FastLanes data file and metadata file.
-	std::filesystem::path              dir_path;
-	fastlanes::Connection              conn;
-	unique_ptr<fastlanes::TableReader> table_reader;
+	std::filesystem::path dir_path;
 };
 } // namespace duckdb

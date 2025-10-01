@@ -150,6 +150,7 @@ std::optional<DataType> PromoteType(DataType first, DataType second) {
 	if (IsStringLike(first) && IsStringLike(second)) {
 		return StringRank(first) >= StringRank(second) ? first : second;
 	}
+	// TODO: This should probably go from unsigned -> signed only
 	if (IsInteger(first) && IsInteger(second)) {
 		const DataType signed_type   = IsSignedInteger(first) ? first : second;
 		const DataType unsigned_type = IsUnsignedInteger(first) ? first : second;

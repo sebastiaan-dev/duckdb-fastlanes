@@ -89,7 +89,7 @@ unique_ptr<ViewWriterFactoryBase> MakeViewWriterFactory(const PhysicalType& type
 	case PhysicalType::VARCHAR:
 		return make_uniq<StringViewWriterFactory>();
 	default:
-		throw NotImplementedException("PhysicalType %s is not supported by FastLanes writer", EnumUtil::ToString(phys));
+		throw NotImplementedException("PhysicalType %s is not supported by FastLanes writer", EnumUtil::ToString(type));
 	}
 }
 

@@ -260,10 +260,16 @@ void FastLanesReader::Scan(ClientContext& context,
 				expr->PointTo(vector_idx);
 				auto& op = expr->operators[expr->operators.size() - 1];
 
+				auto src_type = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup)
+				                    .m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]
+				                    ->data_type;
+
 				if (batch_idx == 0) {
-					local_state.column_decoders[i]->Decode<materializer::Pass::First>(op, target_col, vector_idx);
+					local_state.column_decoders[i]->Decode<materializer::Pass::First>(
+					    op, src_type, target_col, vector_idx);
 				} else {
-					local_state.column_decoders[i]->Decode<materializer::Pass::Second>(op, target_col, vector_idx);
+					local_state.column_decoders[i]->Decode<materializer::Pass::Second>(
+					    op, src_type, target_col, vector_idx);
 				}
 			}
 		}
@@ -307,8 +313,7 @@ unique_ptr<NodeStatistics> FastLanesMultiFileInfo::GetCardinality(const MultiFil
 }
 
 double FastLanesReader::GetProgressInFile(ClientContext& context) {
-	const auto read_vectors = vectors_read.load();
-	return 100.0 * (static_cast<double>(read_vectors * fastlanes::CFG::VEC_SZ) / static_cast<double>(GetTotalTuples()));
+	return 100.0 * (static_cast<double>(vectors_read.load()) / static_cast<double>(GetTotalVectors()));
 }
 
 void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext&        context,
