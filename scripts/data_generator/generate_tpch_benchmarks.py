@@ -16,19 +16,19 @@ FORMAT_CONFIGS = {
     "fls": {
         "require": "fastlanes",
         "load": True,
-        "load_line": "create view {table} as from read_fls('./benchmark/data/generated/fls/{dataset_name}/{table}.fls');",
+        "load_line": "create view {table} as from read_fls('./benchmark/data/tpch/fls/{dataset_name}/{table}.fls');",
         "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
     },
     "parquet": {
         "require": "parquet",
         "load": True,
-        "load_line": "create view {table} as from parquet_scan('./benchmark/data/generated/parquet/{dataset_name}/{table}.parquet');",
+        "load_line": "create view {table} as from parquet_scan('./benchmark/data/tpch/parquet/{dataset_name}/{table}.parquet');",
         "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
     },
     "duckdb": {
         "load": True,
         "load_lines": [
-            "attach './benchmark/data/generated/duckdb/{dataset_name}.duckdb' as tpch_db;",
+            "attach './benchmark/data/tpch/duckdb/{dataset_name}.duckdb' as tpch_db;",
         ],
         "load_table_template": "create or replace view {table} as select * from tpch_db.{table};",
         "run_block": "run duckdb/extension/tpch/dbgen/queries/q${QUERY_NUMBER_PADDED}.sql",
@@ -40,6 +40,7 @@ FORMAT_CONFIGS = {
         ],
     },
 }
+
 
 def build_load_sql(scale, fmt_config) -> str:
     lines: list[str] = []
@@ -98,22 +99,14 @@ def build_template(scale, fmt_name, fmt_config, answers_available: bool) -> str:
         lines.append("")
 
     if fmt_config["load"]:
-        lines.append(f"load benchmark/queries/tpch/{scale.group_tag}/{fmt_name}/load.sql")
+        lines.append(
+            f"load benchmark/queries/tpch/{scale.group_tag}/{fmt_name}/load.sql"
+        )
         lines.append("")
 
     lines.extend(run_block.splitlines())
     lines.append("")
     cleanup_section: list[str] = []
-    # if "cleanup_lines" in fmt_config:
-    #     cleanup_section.extend(
-    #         line.format(dataset_name=scale.dataset_name)
-    #         for line in fmt_config["cleanup_lines"]
-    #     )
-    # if "cleanup_finalize_lines" in fmt_config:
-    #     cleanup_section.extend(
-    #         line.format(dataset_name=scale.dataset_name)
-    #         for line in fmt_config["cleanup_finalize_lines"]
-    #     )
 
     if cleanup_section:
         lines.append("cleanup")
@@ -159,7 +152,9 @@ def generate_scale(scale, formats: list[str]) -> None:
         if scale_dir.exists():
             shutil.rmtree(scale_dir)
         template_path = scale_dir / f"tpch_{scale.group_tag}.benchmark.in"
-        template_content = build_template(scale, fmt_name, fmt_config, answers_available)
+        template_content = build_template(
+            scale, fmt_name, fmt_config, answers_available
+        )
         write_file(template_path, template_content)
 
         if fmt_config["load"]:
