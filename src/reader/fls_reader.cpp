@@ -57,6 +57,8 @@ void FastLanesReader::Initialize() {
 	for (idx_t rowgroup_idx = 0; rowgroup_idx < table_metadata->RowGroupCount(); ++rowgroup_idx) {
 		total_tuples += table_metadata->RowGroupDescriptor(rowgroup_idx).m_n_tuples;
 		total_vectors += table_metadata->RowGroupDescriptor(rowgroup_idx).m_n_vec;
+		// std::cout << "rowgroup_idx: " << rowgroup_idx
+		//           << " has vectors: " << table_metadata->RowGroupDescriptor(rowgroup_idx).m_n_vec << "\n";
 	}
 
 	rowgroup_statistics.Initialize(descriptor, columns);
@@ -68,6 +70,71 @@ void FastLanesReader::AddVirtualColumn(column_t virtual_column_id) {
 		// columns.emplace_back("file_row_number", LogicalType::BIGINT);
 		throw InternalException("Unsupported virtual column id %d for parquet reader", virtual_column_id);
 	}
+}
+
+unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext& context, const string& name) {
+	idx_t file_col_idx;
+	for (file_col_idx = 0; file_col_idx < columns.size(); file_col_idx++) {
+		if (columns[file_col_idx].name == name) {
+			break;
+		}
+	}
+	if (file_col_idx == columns.size()) {
+		return nullptr;
+	}
+
+	auto type = columns[file_col_idx].type;
+
+	switch (type.id()) {
+	case LogicalTypeId::UTINYINT:
+	case LogicalTypeId::USMALLINT:
+	case LogicalTypeId::UINTEGER:
+	case LogicalTypeId::UBIGINT:
+	case LogicalTypeId::TINYINT:
+	case LogicalTypeId::SMALLINT:
+	case LogicalTypeId::INTEGER:
+	case LogicalTypeId::BIGINT:
+	case LogicalTypeId::DATE:
+	case LogicalTypeId::TIME:
+	case LogicalTypeId::TIME_TZ:
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_TZ:
+	case LogicalTypeId::TIMESTAMP_SEC:
+	case LogicalTypeId::TIMESTAMP_MS:
+	case LogicalTypeId::TIMESTAMP_NS:
+	case LogicalTypeId::DECIMAL:
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
+		break;
+	case LogicalTypeId::VARCHAR:
+	default:
+		return nullptr;
+	}
+
+	unique_ptr<BaseStatistics> column_stats;
+	for (idx_t row_group_idx = 0; row_group_idx < table_metadata->RowGroupCount(); row_group_idx++) {
+		auto        chunk_stats    = NumericStats::CreateUnknown(type);
+		const auto* internal_stats = rowgroup_statistics.GetStats(row_group_idx, file_col_idx);
+
+		// TODO: Move this conversion into statistics helper.
+		Value casted;
+		internal_stats->min.DefaultTryCastAs(type, casted, nullptr);
+		NumericStats::SetMin(chunk_stats, casted);
+
+		internal_stats->max.DefaultTryCastAs(type, casted, nullptr);
+		NumericStats::SetMax(chunk_stats, casted);
+
+		// FIXME: FastLanes does not support NULL values currently.
+		chunk_stats.Set(StatsInfo::CANNOT_HAVE_NULL_VALUES);
+
+		if (!column_stats) {
+			column_stats = chunk_stats.ToUnique();
+		} else {
+			column_stats->Merge(*chunk_stats.ToUnique());
+		}
+	}
+
+	return column_stats;
 }
 
 idx_t FastLanesReader::GetNRowGroups() const {

@@ -42,6 +42,7 @@ public:
 	void                       FinishFile(ClientContext& context, GlobalTableFunctionState& global_state_p) override;
 	double                     GetProgressInFile(ClientContext& context) override;
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext& context, const string& name) override;
+	void                       GetPartitionStats(vector<PartitionStatistics>& result) const;
 	shared_ptr<BaseUnionData>  GetUnionData(idx_t file_idx) override;
 
 	void AddVirtualColumn(column_t virtual_column_id) override;

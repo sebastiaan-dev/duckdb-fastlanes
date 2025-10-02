@@ -87,6 +87,24 @@ shared_ptr<BaseUnionData> FastLanesReader::GetUnionData(idx_t file_idx) {
 	return nullptr;
 }
 
+void FastLanesReader::GetPartitionStats(vector<PartitionStatistics>& result) const {
+	// TODO: How do we deal with row group filtering? (Potential FIXME)
+	const auto n_row_groups = table_metadata->RowGroupCount();
+	result.reserve(n_row_groups);
+
+	idx_t offset = 0;
+	for (idx_t rowgroup_idx {0}; rowgroup_idx < n_row_groups; ++rowgroup_idx) {
+		auto& rg_descriptor = table_metadata->RowGroupDescriptor(rowgroup_idx);
+
+		PartitionStatistics partition_stats;
+		partition_stats.row_start  = offset;
+		partition_stats.count      = rg_descriptor.m_n_tuples;
+		partition_stats.count_type = CountType::COUNT_EXACT;
+		offset += partition_stats.count;
+		result.emplace_back(partition_stats);
+	}
+}
+
 void FastLanesMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {
 	auto& bind_data = multi_file_data.bind_data->Cast<FastLanesReadBindData>();
 	// If we are not using union-by-name, there must be an initial reader from which we learn the schema.
@@ -321,10 +339,6 @@ void FastLanesMultiFileInfo::GetVirtualColumns(ClientContext&        context,
                                                virtual_column_map_t& result) {
 	result.insert(make_pair(MultiFileReader::COLUMN_IDENTIFIER_FILE_ROW_NUMBER,
 	                        TableColumn("file_row_number", LogicalType::BIGINT)));
-}
-
-unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext& context, const string& name) {
-	return nullptr;
 }
 
 } // namespace duckdb
