@@ -2,6 +2,7 @@
 
 #include "duckdb/common/constants.hpp"
 #include "duckdb/common/multi_file/multi_file_function.hpp"
+#include "duckdb/common/optional_idx.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
 #include "materializer/column_decoder.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
@@ -33,6 +34,8 @@ struct FastLanesReadLocalState final : LocalTableFunctionState {
 	idx_t cur_rowgroup;
 	//! Vector in the row group that is up for decoding, starts at 0 for every row group.
 	idx_t cur_vector;
+	//! Absolute row offset of the current row group within the file.
+	idx_t row_group_base;
 	//! Local row group reader derived from a global FastLanes instance. Each local reader manages its own buffers.
 	fastlanes::up<fastlanes::RowgroupReader> row_group_reader;
 	//! Column decoders provide a wrapper over decoding kernels for cross-vector column state.
@@ -43,6 +46,8 @@ struct FastLanesReadLocalState final : LocalTableFunctionState {
 	unique_ptr<AdaptiveFilter> adaptive_filter;
 	//!
 	std::vector<std::vector<FastLanesScanFilter*>> filters_by_col;
+	//! Mapping from projected columns to indices inside the physical row group reader results.
+	std::vector<optional_idx> physical_projection_map;
 };
 
 struct FastLanesReadGlobalState final : GlobalTableFunctionState {

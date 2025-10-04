@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb/common/multi_file/base_file_reader.hpp"
+#include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
 #include "fls/reader/rowgroup_reader.hpp"
@@ -58,6 +59,8 @@ private:
 	void                      Initialize();
 	const std::vector<idx_t>& GetRowGroupsToScan();
 	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
+	void EnsureFileRowNumberColumn();
+	bool IsFileRowNumberColumn(column_t column_id) const;
 
 private:
 	size_t                    total_vectors;
@@ -68,5 +71,7 @@ private:
 	RowGroupFilter            rowgroup_filter_catalog;
 	//! Path of the directory containing both the FastLanes data file and metadata file.
 	std::filesystem::path dir_path;
+	optional_idx              file_row_number_local_idx;
+	std::vector<idx_t>        row_group_offsets;
 };
 } // namespace duckdb

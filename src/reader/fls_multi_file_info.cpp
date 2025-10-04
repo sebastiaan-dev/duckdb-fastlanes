@@ -212,29 +212,52 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 		}
 	}
 
-	// Create column decoders for each column, if they exist reset them as row groups can have differing cross-vector
-	// state.
-	if (local_state.column_decoders.size() == 0) {
+	local_state.row_group_base = row_group_offsets.empty() ? 0 : row_group_offsets[local_state.cur_rowgroup];
+
+	local_state.physical_projection_map.clear();
+	local_state.physical_projection_map.resize(column_ids.size());
+	idx_t physical_projection_count = 0;
+	for (idx_t i {0}; i < column_ids.size(); ++i) {
+		const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
+		if (IsFileRowNumberColumn(local_column_id)) {
+			continue;
+		}
+		local_state.physical_projection_map[i] = optional_idx(physical_projection_count);
+		physical_projection_count++;
+	}
+
+	if (local_state.column_decoders.size() != column_ids.size()) {
+		local_state.column_decoders.clear();
+		local_state.column_decoders.resize(column_ids.size());
 		for (idx_t i {0}; i < column_ids.size(); ++i) {
-			local_state.column_decoders.push_back(make_uniq<materializer::ColumnDecoder>());
+			if (local_state.physical_projection_map[i].IsValid()) {
+				local_state.column_decoders[i] = make_uniq<materializer::ColumnDecoder>();
+			}
 		}
 	} else {
-		for (const auto& decoder : local_state.column_decoders) {
-			decoder->Reset();
+		for (auto& decoder : local_state.column_decoders) {
+			if (decoder) {
+				decoder->Reset();
+			}
 		}
 	}
 
-	// Do an initial pass to initialize the column decoders with the correct state.
-	for (idx_t i {0}; i < column_ids.size(); ++i) {
-		auto&       type        = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
+	if (physical_projection_count > 0) {
 		const auto& expressions = local_state.row_group_reader->get_chunk(0);
-		const auto  expr        = expressions[i];
-		expr->PointTo(0);
-		auto& op = expr->operators[expr->operators.size() - 1];
-		if (filters) {
-			local_state.column_decoders[i]->Init(op, type, &local_state.filters_by_col[i]);
-		} else {
-			local_state.column_decoders[i]->Init(op, type, nullptr);
+		for (idx_t i {0}; i < column_ids.size(); ++i) {
+			auto physical_index = local_state.physical_projection_map[i];
+			if (!physical_index.IsValid()) {
+				continue;
+			}
+			auto& type = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
+			const auto expr = expressions[physical_index.GetIndex()];
+			expr->PointTo(0);
+			auto& op = expr->operators[expr->operators.size() - 1];
+			if (filters) {
+				local_state.column_decoders[i]->Init(op, type, &local_state.filters_by_col[i]);
+			} else {
+				local_state.column_decoders[i]->Init(op, type, nullptr);
+			}
 		}
 	}
 
@@ -265,30 +288,54 @@ void FastLanesReader::Scan(ClientContext& context,
 			return;
 		}
 
+		const bool has_physical_columns = std::any_of(
+		    local_state.physical_projection_map.begin(), local_state.physical_projection_map.end(),
+		    [](const optional_idx& entry) { return entry.IsValid(); });
+
 		// Try to fill up to the standard vector size.
 		for (idx_t batch_idx = 0; batch_idx < n_vectors; batch_idx++) {
-			const idx_t vector_idx  = cur_vec + batch_idx;
-			const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
+			const idx_t vector_idx = cur_vec + batch_idx;
+			if (has_physical_columns) {
+				const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup);
+				const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
+				for (idx_t i = 0; i < column_ids.size(); i++) {
+					auto physical_entry = local_state.physical_projection_map[i];
+					if (!physical_entry.IsValid()) {
+						continue;
+					}
+					auto&      target_col = chunk.data[i];
+					const auto expr       = expressions[physical_entry.GetIndex()];
 
-			for (idx_t i = 0; i < column_ids.size(); i++) {
-				// These indexes map to the same column due to a mapping in CreateRowGroupReader().
-				auto&      target_col = chunk.data[i];
-				const auto expr       = expressions[i];
+					expr->PointTo(vector_idx);
+					auto& op = expr->operators[expr->operators.size() - 1];
 
-				expr->PointTo(vector_idx);
-				auto& op = expr->operators[expr->operators.size() - 1];
+					auto src_type = rowgroup_descriptor
+					                    .m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]
+					                    ->data_type;
 
-				auto src_type = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup)
-				                    .m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]
-				                    ->data_type;
-
-				if (batch_idx == 0) {
-					local_state.column_decoders[i]->Decode<materializer::Pass::First>(
-					    op, src_type, target_col, vector_idx);
-				} else {
-					local_state.column_decoders[i]->Decode<materializer::Pass::Second>(
-					    op, src_type, target_col, vector_idx);
+					if (batch_idx == 0) {
+						local_state.column_decoders[i]->Decode<materializer::Pass::First>(
+						    op, src_type, target_col, vector_idx);
+					} else {
+						local_state.column_decoders[i]->Decode<materializer::Pass::Second>(
+						    op, src_type, target_col, vector_idx);
+					}
 				}
+			}
+		}
+
+		const idx_t row_start = local_state.row_group_base + start_tuple;
+		for (idx_t i = 0; i < column_ids.size(); i++) {
+			const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
+			if (!IsFileRowNumberColumn(local_column_id)) {
+				continue;
+			}
+			auto& target_col = chunk.data[i];
+			target_col.SetVectorType(VectorType::FLAT_VECTOR);
+			FlatVector::Validity(target_col).Reset();
+			auto data = FlatVector::GetData<int64_t>(target_col);
+			for (idx_t row = 0; row < count; ++row) {
+				data[row] = static_cast<int64_t>(row_start + row);
 			}
 		}
 
