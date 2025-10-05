@@ -25,7 +25,7 @@ class ColumnDecoder;
 class FastLanesReader final : public BaseFileReader {
 public:
 	explicit FastLanesReader(OpenFileInfo file_p);
-	explicit FastLanesReader(OpenFileInfo file_p, FastLanesFileReaderOptions& options);
+	explicit FastLanesReader(OpenFileInfo file_p, const FastLanesFileReaderOptions& options);
 	~FastLanesReader() override;
 
 	std::string GetReaderType() const override {
@@ -45,6 +45,7 @@ public:
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext& context, const string& name) override;
 	void                       GetPartitionStats(vector<PartitionStatistics>& result) const;
 	shared_ptr<BaseUnionData>  GetUnionData(idx_t file_idx) override;
+	const FastLanesFileReaderOptions& GetOptions() const;
 
 	void AddVirtualColumn(column_t virtual_column_id) override;
 
@@ -70,8 +71,9 @@ private:
 	RowGroupStatistics        rowgroup_statistics;
 	RowGroupFilter            rowgroup_filter_catalog;
 	//! Path of the directory containing both the FastLanes data file and metadata file.
-	std::filesystem::path dir_path;
-	optional_idx              file_row_number_local_idx;
-	std::vector<idx_t>        row_group_offsets;
+	std::filesystem::path      dir_path;
+	optional_idx               file_row_number_local_idx;
+	std::vector<idx_t>         row_group_offsets;
+	FastLanesFileReaderOptions reader_options;
 };
 } // namespace duckdb

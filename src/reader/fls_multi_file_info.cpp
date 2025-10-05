@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <duckdb/execution/adaptive_filter.hpp>
 #include <fls/expression/physical_expression.hpp>
-#include <iostream>
 #include <thread>
 
 namespace duckdb {
@@ -76,15 +75,14 @@ void FastLanesMultiFileInfo::BindReader(ClientContext&       context,
                                         vector<LogicalType>& return_types,
                                         vector<string>&      names,
                                         MultiFileBindData&   bind_data) {
-	const auto& bind      = bind_data.bind_data->Cast<FastLanesReadBindData>();
-	bind_data.reader_bind = bind_data.multi_file_reader->BindReader(
-	    context, return_types, names, *bind_data.file_list, bind_data, *bind.options, bind_data.file_options);
-}
-
-shared_ptr<BaseUnionData> FastLanesReader::GetUnionData(idx_t file_idx) {
-	std::cout << "Union Data" << '\n';
-
-	return nullptr;
+	const auto& bind = bind_data.bind_data->Cast<FastLanesReadBindData>();
+	if (bind_data.file_options.union_by_name) {
+		bind_data.reader_bind = bind_data.multi_file_reader->BindUnionReader(
+		    context, return_types, names, *bind_data.file_list, bind_data, *bind.options, bind_data.file_options);
+	} else {
+		bind_data.reader_bind = bind_data.multi_file_reader->BindReader(
+		    context, return_types, names, *bind_data.file_list, bind_data, *bind.options, bind_data.file_options);
+	}
 }
 
 void FastLanesReader::GetPartitionStats(vector<PartitionStatistics>& result) const {
@@ -107,18 +105,17 @@ void FastLanesReader::GetPartitionStats(vector<PartitionStatistics>& result) con
 
 void FastLanesMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {
 	auto& bind_data = multi_file_data.bind_data->Cast<FastLanesReadBindData>();
-	// If we are not using union-by-name, there must be an initial reader from which we learn the schema.
-	if (!multi_file_data.file_options.union_by_name) {
-		D_ASSERT(multi_file_data.initial_reader);
-
-		const auto& initial_reader         = multi_file_data.initial_reader->Cast<FastLanesReader>();
+	if (multi_file_data.initial_reader) {
+		auto& initial_reader               = multi_file_data.initial_reader->Cast<FastLanesReader>();
 		bind_data.initial_file_cardinality = initial_reader.GetTotalTuples();
 		bind_data.initial_file_n_rowgroups = initial_reader.GetNRowGroups();
-
-		return;
+		if (bind_data.options) {
+			bind_data.options->file_row_number = initial_reader.GetOptions().file_row_number;
+		}
+	} else {
+		bind_data.initial_file_cardinality = 0;
+		bind_data.initial_file_n_rowgroups = 0;
 	}
-
-	throw std::runtime_error("Union by name is not supported");
 }
 
 optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData&    bind_data_p,
@@ -136,17 +133,19 @@ optional_idx FastLanesMultiFileInfo::MaxThreads(const MultiFileBindData&    bind
 
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext&,
                                                                 GlobalTableFunctionState& global_state_p,
-                                                                BaseUnionData&            union_data,
+                                                                BaseUnionData&            union_data_p,
                                                                 const MultiFileBindData&) {
-	return make_shared_ptr<FastLanesReader>(union_data.file);
+	auto& union_data = union_data_p.Cast<FastLanesUnionData>();
+	return make_shared_ptr<FastLanesReader>(union_data.file, union_data.options);
 }
 
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext&,
                                                                 GlobalTableFunctionState& global_state_p,
                                                                 const OpenFileInfo&       file,
                                                                 idx_t                     file_idx,
-                                                                const MultiFileBindData&) {
-	return make_shared_ptr<FastLanesReader>(file);
+                                                                const MultiFileBindData&  bind_data_p) {
+	const auto& bind_data = bind_data_p.bind_data->Cast<FastLanesReadBindData>();
+	return make_shared_ptr<FastLanesReader>(file, *bind_data.options);
 }
 
 shared_ptr<BaseFileReader> FastLanesMultiFileInfo::CreateReader(ClientContext&,
@@ -249,7 +248,7 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 			if (!physical_index.IsValid()) {
 				continue;
 			}
-			auto& type = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
+			auto&      type = columns[column_ids[MultiFileLocalIndex(i)].GetId()].type;
 			const auto expr = expressions[physical_index.GetIndex()];
 			expr->PointTo(0);
 			auto& op = expr->operators[expr->operators.size() - 1];
@@ -288,16 +287,16 @@ void FastLanesReader::Scan(ClientContext& context,
 			return;
 		}
 
-		const bool has_physical_columns = std::any_of(
-		    local_state.physical_projection_map.begin(), local_state.physical_projection_map.end(),
-		    [](const optional_idx& entry) { return entry.IsValid(); });
+		const bool has_physical_columns = std::any_of(local_state.physical_projection_map.begin(),
+		                                              local_state.physical_projection_map.end(),
+		                                              [](const optional_idx& entry) { return entry.IsValid(); });
 
 		// Try to fill up to the standard vector size.
 		for (idx_t batch_idx = 0; batch_idx < n_vectors; batch_idx++) {
 			const idx_t vector_idx = cur_vec + batch_idx;
 			if (has_physical_columns) {
 				const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup);
-				const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
+				const auto& expressions         = local_state.row_group_reader->get_chunk(vector_idx);
 				for (idx_t i = 0; i < column_ids.size(); i++) {
 					auto physical_entry = local_state.physical_projection_map[i];
 					if (!physical_entry.IsValid()) {
@@ -309,9 +308,8 @@ void FastLanesReader::Scan(ClientContext& context,
 					expr->PointTo(vector_idx);
 					auto& op = expr->operators[expr->operators.size() - 1];
 
-					auto src_type = rowgroup_descriptor
-					                    .m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]
-					                    ->data_type;
+					auto src_type =
+					    rowgroup_descriptor.m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]->data_type;
 
 					if (batch_idx == 0) {
 						local_state.column_decoders[i]->Decode<materializer::Pass::First>(

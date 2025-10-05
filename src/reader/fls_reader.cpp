@@ -17,15 +17,18 @@ namespace duckdb {
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
     : BaseFileReader(std::move(file_p))
     , vectors_read(0) {
+	reader_options.explicit_cardinality = 0;
+	reader_options.file_row_number      = false;
 	Initialize();
 }
 
-FastLanesReader::FastLanesReader(OpenFileInfo file_p, FastLanesFileReaderOptions& options)
+FastLanesReader::FastLanesReader(OpenFileInfo file_p, const FastLanesFileReaderOptions& options)
     : BaseFileReader(std::move(file_p))
-    , vectors_read(0) {
+    , vectors_read(0)
+    , reader_options(options) {
 	Initialize();
 
-	if (options.file_row_number) {
+	if (reader_options.file_row_number) {
 		EnsureFileRowNumberColumn();
 	}
 }
@@ -34,10 +37,7 @@ FastLanesReader::~FastLanesReader() {
 }
 
 void FastLanesReader::Initialize() {
-	total_vectors = 0;
-	total_tuples  = 0;
 	file_row_number_local_idx.SetInvalid();
-	row_group_offsets.clear();
 
 	table_metadata = make_uniq<TableMetadata>(file.path);
 
@@ -80,6 +80,7 @@ void FastLanesReader::EnsureFileRowNumberColumn() {
 	result.identifier = Value::INTEGER(MultiFileReader::ORDINAL_FIELD_ID);
 	file_row_number_local_idx = optional_idx(columns.size());
 	columns.push_back(std::move(result));
+	reader_options.file_row_number = true;
 }
 
 bool FastLanesReader::IsFileRowNumberColumn(column_t column_id) const {
@@ -95,6 +96,25 @@ void FastLanesReader::AddVirtualColumn(column_t virtual_column_id) {
 		return;
 	}
 	throw InternalException("Unsupported virtual column id %d for FastLanes reader", virtual_column_id);
+}
+
+const FastLanesFileReaderOptions& FastLanesReader::GetOptions() const {
+	return reader_options;
+}
+
+shared_ptr<BaseUnionData> FastLanesReader::GetUnionData(idx_t file_idx) {
+	auto data = make_shared_ptr<FastLanesUnionData>(file);
+	data->names.reserve(columns.size());
+	data->types.reserve(columns.size());
+	for (auto& column : columns) {
+		data->names.push_back(column.name);
+		data->types.push_back(column.type);
+	}
+	data->options = reader_options;
+	if (file_idx == 0) {
+		data->reader = shared_from_this();
+	}
+	return data;
 }
 
 unique_ptr<BaseStatistics> GetNumericalStats(const ColumnStats& internal_stats, const LogicalType& type) {

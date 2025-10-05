@@ -6,6 +6,7 @@
 #include "fls/reader/rowgroup_reader.hpp"
 #include "materializer/column_decoder.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
+#include <utility>
 
 namespace duckdb {
 struct FastLanesScanFilter;
@@ -18,6 +19,13 @@ public:
 
 	idx_t explicit_cardinality = 0;
 	bool  file_row_number      = false;
+};
+
+struct FastLanesUnionData : public BaseUnionData {
+	explicit FastLanesUnionData(OpenFileInfo file_p) : BaseUnionData(std::move(file_p)) {
+	}
+
+	FastLanesFileReaderOptions options;
 };
 
 struct FastLanesReadBindData final : TableFunctionData {

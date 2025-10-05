@@ -3,7 +3,6 @@
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/storage/table/row_group.hpp"
 #include <algorithm>
-#include <iostream>
 #include <numeric>
 
 namespace duckdb {
@@ -52,7 +51,7 @@ void RowGroupFilter::SetRowIdInfo(const std::vector<idx_t>* row_group_offsets,
 	if (new_valid) {
 		row_id_column_ref = row_id_column;
 	} else {
-		row_id_column_ref = optional_idx();
+		row_id_column_ref.SetInvalid();
 	}
 	if (changed) {
 		ready.store(false, std::memory_order_relaxed);
