@@ -20,7 +20,7 @@ endef
 define tpch_target_template
 .PHONY: bench-run-tpch-sf$(1)-$(2)
 bench-run-tpch-sf$(1)-$(2): bench-output-dir
-	./build/release/benchmark/benchmark_runner --root-dir './' 'benchmark/queries/tpch/sf$(1)/$(2)/$(BENCHMARK_PATTERN)' 2>&1 | tee benchmark/results/tpch-sf$(1)-$(2).csv
+	./build/release/benchmark/benchmark_runner --root-dir './' 'benchmark/queries/tpch/sf$(1)/$(2)/$(BENCHMARK_PATTERN)' 2>&1 | tee benchmark/results/tpch/tpch-sf$(1)-$(2).csv
 endef
 
 define tpch_aggregate_template

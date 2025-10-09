@@ -19,7 +19,9 @@ build-fls-generator:
 	cmake --build build/release --target generate_fls -j 8
 
 generate-data: build-fls-generator
-	python3 -m pip install duckdb
+	python3 -m pip install duckdb==v1.3.2
 	python3 scripts/data_generator/generate_test_data.py --scale-factors $(TPCH_SCALE_FACTORS)
-	python3 scripts/data_generator/fls/generate_fls_files.py --scale-factors $(TPCH_SCALE_FACTORS)
 	python3 scripts/data_generator/generate_tpch_benchmarks.py --scale-factors $(TPCH_SCALE_FACTORS)
+
+generate-vis:
+	python3 scripts/plot_query_timings.py --scale-factor $(TPCH_SCALE_FACTORS)

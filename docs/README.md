@@ -85,6 +85,32 @@ make bench-run-tpch-sf1-parquet
 make bench-run-tpch-sf1-duckdb
 ```
 
+To run volumetric scan benchmarks directly from Python use the helper script:
+```sh
+python benchmark/run_volumetric_benchmarks.py --topics tpch --datasets tpch_sf1 --formats duckdb
+```
+Key options allow configuring the number of DuckDB threads (`--threads`), enabling or disabling the object cache (`--enable-object-cache` / `--disable-object-cache`), toggling the external file cache, and setting the number of measured iterations. Profiling artefacts and structured results are written to `benchmark/results/volumetric/` and include one JSON profiling file per benchmark run. Profiling files are stored in per-configuration subdirectories so multiple runs with different settings never overwrite one another.
+Additional options let you control row group sizes when scanning Parquet (`--parquet-row-group-size`) or FastLanes (`--fastlanes-row-group-size`) datasets; other formats ignore these flags.
+
+Visualise the collected results (including a breakdown of time spent inside table functions versus other operators) with:
+```sh
+python scripts/plot_volumetric_results.py --results-root benchmark/results/volumetric
+```
+Plots are emitted under `benchmark/results/volumetric/plots/`, grouped by configuration (e.g. `…/plots/threads-8__objcache-off__extcache-on__iters-5/`) and include per-operation format comparisons, per-dataset summaries, and hotspot breakdowns for the slowest column/operation combinations.
+
+Generate per-configuration speed-up matrices comparing FastLanes to Parquet with:
+```sh
+python scripts/compare_fastlanes_vs_parquet.py --results-root benchmark/results/volumetric
+```
+This writes CSV tables and matching heatmaps (PNG) into `benchmark/results/volumetric/comparisons/<config>/` with separate matrices for total query latency and scan-only time. Rows are grouped by table/column, columns enumerate the benchmarked operations, and each cell reports the relative speed-up (FastLanes vs Parquet, where 1.00 means parity) using a green/white/red diverging palette. Per-table heatmaps are also emitted to `…/per_table/`, allowing a focused view on each table.
+
+### Public BI data
+The script `scripts/data_generator/generate_public_bi.py` downloads the [Public BI benchmark](https://event.cwi.nl/da/PublicBIbenchmark/) datasets, expands the compressed CSV files, and materialises the `public-bi` topic under `benchmark/data/` (CSV, DuckDB, Parquet, and FastLanes outputs). For example:
+```sh
+python scripts/data_generator/generate_public_bi.py --datasets AirlineSentiment --overwrite
+```
+Run without `--overwrite` to reuse existing CSV downloads; add `--force-download` to refresh them. Omit `--datasets` to ingest every dataset advertised by the Public BI index. The script expects network access and a local FastLanes build (`build/release/extension/fastlanes/fastlanes.duckdb_extension`) to produce `.fls` files.
+
 
 ### Running the tests
 Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
