@@ -7,13 +7,13 @@
 namespace duckdb::materializer {
 
 struct KernelInitVisitor {
-	LogicalType&                       type;
+	LogicalType&                       dest_type;
 	ColumnCtxHandle&                   ctx;
 	std::vector<FastLanesScanFilter*>* scan_filters;
 
 	template <typename OpT>
 	void operator()(fastlanes::sp<OpT> const& op) const {
-		KernelTraits<OpT>::Prepare(ctx, type, *op, scan_filters);
+		KernelTraits<OpT>::Prepare(ctx, dest_type, *op, scan_filters);
 	}
 
 	void operator()(const auto&) const {
@@ -23,13 +23,14 @@ struct KernelInitVisitor {
 
 template <Pass PASS>
 struct KernelDecodeVisitor {
-	Vector&          v;
-	ColumnCtxHandle& ctx;
-	idx_t            vec_idx;
+	fastlanes::DataType& src_type;
+	Vector&              v;
+	ColumnCtxHandle&     ctx;
+	idx_t                vec_idx;
 
 	template <typename OpT>
 	void operator()(fastlanes::sp<OpT> const& op) const {
-		KernelTraits<OpT>::template Decode<PASS>(ctx, v, vec_idx, *op);
+		KernelTraits<OpT>::template Decode<PASS>(ctx, v, vec_idx, *op, src_type);
 	}
 
 	void operator()(const auto&) const {

@@ -105,7 +105,8 @@ struct KernelTraits<fastlanes::dec_cross_rle_opr<PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t vec_idx, fastlanes::dec_cross_rle_opr<PT>& op) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t vec_idx, fastlanes::dec_cross_rle_opr<PT>& op, fastlanes::DataType&) {
 		const auto* length = reinterpret_cast<const fastlanes::len_t*>(op.lengths_segment.data);
 		const auto* values = reinterpret_cast<const PT*>(op.values_segment.data);
 
@@ -126,8 +127,11 @@ struct KernelTraits<fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>> {
 	}
 
 	template <Pass PASS>
-	static void
-	Decode(ColumnCtxHandle&, Vector& col, idx_t vec_idx, fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>& op) {
+	static void Decode(ColumnCtxHandle&,
+	                   Vector&                                                col,
+	                   idx_t                                                  vec_idx,
+	                   fastlanes::dec_cross_rle_opr<fastlanes::fls_string_t>& op,
+	                   fastlanes::DataType&) {
 		const auto  target       = GetDataPtr<PASS, string_t>(col);
 		const auto* length       = reinterpret_cast<const fastlanes::len_t*>(op.lengths_segment.data);
 		const auto* values_bytes = reinterpret_cast<const uint8_t*>(op.values_bytes_seg.data);

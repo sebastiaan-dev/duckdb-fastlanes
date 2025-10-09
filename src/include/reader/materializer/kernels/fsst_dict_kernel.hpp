@@ -299,7 +299,8 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle& ctx, Vector& col, idx_t, fastlanes::dec_fsst_dict_opr<INDEX_PT>& op) {
+	static void
+	Decode(ColumnCtxHandle& ctx, Vector& col, idx_t, fastlanes::dec_fsst_dict_opr<INDEX_PT>& op, fastlanes::DataType&) {
 		auto& c     = ctx.Expect<FSSTDictColumnCtx>();
 		auto  index = op.Index();
 

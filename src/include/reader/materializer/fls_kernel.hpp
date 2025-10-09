@@ -28,7 +28,7 @@ struct KernelTraits {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector&, idx_t, OpT&) {
+	static void Decode(ColumnCtxHandle&, Vector&, idx_t, OpT&, fastlanes::DataType&) {
 		throw std::runtime_error("Not implemented");
 	}
 };

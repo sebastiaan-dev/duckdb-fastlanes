@@ -128,7 +128,13 @@ struct NumericHelper {
 
 	template <typename SRC>
 	static void UntransposeBlock(SRC* transposed, Vector& col) {
-		const auto physical_type = col.GetType().InternalType();
+		const auto physical_type   = col.GetType().InternalType();
+		const auto source_physical = GetTypeId<SRC>();
+		if (physical_type == source_physical) {
+			auto dest = GetDataPtr<SRC>(col);
+			generated::untranspose::fallback::scalar::untranspose_i(transposed, dest);
+			return;
+		}
 		DispatchNumericPhysicalType(physical_type, UntransposeVisitor<PASS, SRC> {transposed, col});
 	}
 };

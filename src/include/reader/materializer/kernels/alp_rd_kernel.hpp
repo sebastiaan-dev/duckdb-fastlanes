@@ -12,7 +12,7 @@ struct KernelTraits<fastlanes::dec_alp_rd_opr<PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_alp_rd_opr<PT>& op) {
+	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_alp_rd_opr<PT>& op, fastlanes::DataType&) {
 		detail::NumericHelper<PASS>::template CopyVector<PT>(op.glue_arr, col);
 	}
 };

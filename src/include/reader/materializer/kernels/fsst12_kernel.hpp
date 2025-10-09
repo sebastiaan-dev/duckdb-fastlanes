@@ -5,18 +5,6 @@
 
 namespace duckdb::materializer {
 
-// #if defined(__AVX512BW__)
-// namespace impl = generated::untranspose::avx512bw;
-// #elif defined(__AVX2__)
-// namespace impl = generated::untranspose::avx2;
-// #elif defined(__SSE2__) || defined(__SSE__)
-// namespace impl = generated::untranspose::sse;
-// #elif defined(__ARM_NEON) || defined(__ARM_NEON__)
-// namespace impl = generated::untranspose::neon;
-// #else
-// namespace impl = generated::untranspose::fallback::scalar;
-// #endif
-
 template <>
 struct KernelTraits<fastlanes::dec_fsst12_opr> {
 	static void
@@ -24,7 +12,7 @@ struct KernelTraits<fastlanes::dec_fsst12_opr> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_fsst12_opr& opr) {
+	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_fsst12_opr& opr, fastlanes::DataType&) {
 		const auto target_ptr  = GetDataPtr<PASS, string_t>(col);
 		auto*      in_byte_arr = reinterpret_cast<uint8_t*>(opr.fsst12_bytes_segment_view.data);
 

@@ -24,7 +24,8 @@ struct KernelTraits<fastlanes::dec_fsst_opr> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle& ctx, Vector& target_col, idx_t, fastlanes::dec_fsst_opr& opr) {
+	static void
+	Decode(ColumnCtxHandle& ctx, Vector& target_col, idx_t, fastlanes::dec_fsst_opr& opr, fastlanes::DataType&) {
 		auto& c = ctx.Expect<FSSTColumnCtx>();
 		if constexpr (PASS == Pass::First) {
 			target_col.SetVectorType(VectorType::FSST_VECTOR);
@@ -52,5 +53,35 @@ struct KernelTraits<fastlanes::dec_fsst_opr> {
 		}
 	}
 };
+
+// auto* in_byte_arr = reinterpret_cast<uint8_t*>(opr.fsst_bytes_segment_view.data);
+// generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
+//
+// auto target_ptr = GetDataPtr<PASS, string_t>(target_col);
+// for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
+//
+// 	fastlanes::len_t encoded_size {0};
+// 	fastlanes::ofs_t offset {0};
+//
+// 	if (i == 0) {
+// 		encoded_size = opr.untrasposed_offset[0];
+// 	} else {
+// 		offset                 = opr.untrasposed_offset[i - 1];
+// 		const auto offset_next = opr.untrasposed_offset[i];
+// 		encoded_size           = offset_next - offset;
+// 	}
+//
+// 	const auto decoded_size =
+// 	    static_cast<fastlanes::ofs_t>(fsst_decompress(&opr.fsst_decoder,
+// 	                                                  encoded_size,
+// 	                                                  in_byte_arr,
+// 	                                                  fastlanes::CFG::String::max_bytes_per_string,
+// 	                                                  opr.tmp_string.data()));
+//
+// 	target_ptr[i] =
+// 	    StringVector::AddString(target_col, reinterpret_cast<const char*>(opr.tmp_string.data()), decoded_size);
+//
+// 	in_byte_arr += encoded_size;
+// }
 
 } // namespace duckdb::materializer

@@ -14,19 +14,23 @@ struct KernelTraits<fastlanes::dec_frequency_opr<PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_frequency_opr<PT>& op) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_frequency_opr<PT>& op, fastlanes::DataType&) {
 		detail::NumericHelper<PASS>::template CopyVector<PT>(op.data, col);
 	}
 };
 
 template <>
 struct KernelTraits<fastlanes::dec_frequency_str_opr> {
-	static void
-	Prepare(ColumnCtxHandle&, LogicalType&, fastlanes::dec_frequency_str_opr&, const std::vector<FastLanesScanFilter*>*) {
+	static void Prepare(ColumnCtxHandle&,
+	                    LogicalType&,
+	                    fastlanes::dec_frequency_str_opr&,
+	                    const std::vector<FastLanesScanFilter*>*) {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_frequency_str_opr& op) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_frequency_str_opr& op, fastlanes::DataType&) {
 		const auto target  = GetDataPtr<PASS, string_t>(col);
 		size_t     entries = 0;
 

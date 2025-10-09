@@ -15,7 +15,8 @@ struct KernelTraits<fastlanes::dec_fsst12_dict_opr<INDEX_PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_fsst12_dict_opr<INDEX_PT>& opr) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_fsst12_dict_opr<INDEX_PT>& opr, fastlanes::DataType&) {
 		const auto target_ptr  = GetDataPtr<PASS, string_t>(col);
 		auto*      in_byte_arr = reinterpret_cast<uint8_t*>(opr.fsst12_bytes_segment_view.data);
 

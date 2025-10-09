@@ -185,6 +185,7 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	// Prepare the local state of the current worker by assigning it a row group.
 	local_state.cur_rowgroup     = rowgroups_to_scan[global_state.next_rowgroup];
 	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
+	local_state.row_group_base = row_group_offsets[local_state.cur_rowgroup];
 	// Reset the row group related local state.
 	local_state.cur_vector = 0;
 
@@ -197,8 +198,7 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 
 		local_state.filters_by_col.assign(column_ids.size(), {});
 		for (auto& f : local_state.scan_filters) {
-			const idx_t col = f.filter_idx;
-			if (col < column_ids.size()) {
+			if (const idx_t col = f.filter_idx; col < column_ids.size()) {
 				local_state.filters_by_col[col].push_back(&f);
 			}
 		}
@@ -210,8 +210,6 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 			filter.ctx.Reset();
 		}
 	}
-
-	local_state.row_group_base = row_group_offsets.empty() ? 0 : row_group_offsets[local_state.cur_rowgroup];
 
 	local_state.physical_projection_map.clear();
 	local_state.physical_projection_map.resize(column_ids.size());

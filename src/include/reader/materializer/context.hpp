@@ -36,6 +36,14 @@ struct KeepAlive : VectorBuffer {
 
 struct ColumnCtxBase {
 	virtual ~ColumnCtxBase() = default;
+
+public:
+	fastlanes::DataType data_type;
+};
+
+template <typename PT>
+struct DictColumnCtx final : ColumnCtxBase {
+	std::vector<PT> keys;
 };
 
 struct FSSTColumnCtx final : ColumnCtxBase {

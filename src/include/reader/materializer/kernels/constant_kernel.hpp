@@ -14,10 +14,12 @@ struct KernelTraits<fastlanes::dec_constant_opr<PT>> {
 	                    LogicalType&,
 	                    const fastlanes::dec_constant_opr<PT>&,
 	                    const std::vector<FastLanesScanFilter*>*) {
+		// std::cout << "Prepare fastlanes::dec_constant_opr" << std::endl;
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, const fastlanes::dec_constant_opr<PT>& op) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t, const fastlanes::dec_constant_opr<PT>& op, fastlanes::DataType&) {
 		if constexpr (PASS == Pass::First) {
 			detail::NumericHelper<Pass::First>::template AssignValue<PT>(op.value, col, 0);
 			col.SetVectorType(VectorType::CONSTANT_VECTOR);
@@ -35,7 +37,8 @@ struct KernelTraits<fastlanes::dec_constant_str_opr> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_constant_str_opr& op) {
+	static void
+	Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_constant_str_opr& op, fastlanes::DataType&) {
 		if constexpr (PASS == Pass::First) {
 			col.SetVectorType(VectorType::CONSTANT_VECTOR);
 			ConstantVector::SetNull(col, false);

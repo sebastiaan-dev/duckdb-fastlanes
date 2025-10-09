@@ -13,16 +13,13 @@ struct KernelTraits<fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>> {
 	}
 
 	template <Pass PASS>
-	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>& op) {
-		std::array<KEY_PT, fastlanes::CFG::VEC_SZ> decoded {};
-		const auto*                                rle_vals_bytes = op.rle_vals_segment_view.data;
-
-		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; i++) {
-			const auto byte_offset = op.idxs[i] * sizeof(KEY_PT);
-			decoded[i]             = load_unaligned<KEY_PT>(rle_vals_bytes + byte_offset);
+	static void Decode(
+	    ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_rle_map_opr<KEY_PT, INDEX_PT>& op, fastlanes::DataType&) {
+		//  FIXME: Decode
+		auto* rle_vals = reinterpret_cast<KEY_PT*>(op.rle_vals_segment_view.data);
+		for (auto idx {0}; idx < fastlanes::CFG::VEC_SZ; idx++) {
+			detail::NumericHelper<PASS>::AssignValue(rle_vals[op.idxs[idx]], col, idx);
 		}
-
-		detail::NumericHelper<PASS>::template CopyVector<KEY_PT>(decoded.data(), col);
 	}
 };
 
@@ -35,8 +32,11 @@ struct KernelTraits<fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT
 	}
 
 	template <Pass PASS>
-	static void
-	Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>& op) {
+	static void Decode(ColumnCtxHandle&,
+	                   Vector& col,
+	                   idx_t,
+	                   fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT>& op,
+	                   fastlanes::DataType&) {
 		const auto target_ptr = GetDataPtr<PASS, string_t>(col);
 
 		const auto* bytes   = reinterpret_cast<uint8_t*>(op.rle_vals_segment_view.data);
