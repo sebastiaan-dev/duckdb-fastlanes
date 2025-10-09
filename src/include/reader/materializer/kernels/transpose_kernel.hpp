@@ -2,8 +2,6 @@
 
 #include "fls/expression/transpose_operator.hpp"
 #include "reader/materializer/fls_type_resolver.hpp"
-#include "reader/materializer/kernels/neon.hpp"
-#include <arm_neon.h>
 
 namespace duckdb::materializer {
 
