@@ -169,7 +169,7 @@ std::optional<DataType> PromoteType(DataType first, DataType second) {
 	return std::nullopt;
 }
 
-SchemaBuilder::SchemaBuilder(const fastlanes::TableDescriptorT& table_descriptor_p, const std::string& file_path_p)
+SchemaBuilder::SchemaBuilder(const fastlanes::TableDescriptor& table_descriptor_p, const std::string& file_path_p)
     : table_descriptor(table_descriptor_p)
     , file_path(file_path_p) {
 }
@@ -177,38 +177,39 @@ SchemaBuilder::SchemaBuilder(const fastlanes::TableDescriptorT& table_descriptor
 SchemaBuildResult SchemaBuilder::Build() const {
 	SchemaBuildResult result;
 
-	const auto& rowgroup_descriptors = table_descriptor.m_rowgroup_descriptors;
-	if (rowgroup_descriptors.empty()) {
+	const auto& rowgroup_descriptors = table_descriptor.m_rowgroup_descriptors();
+	if (rowgroup_descriptors->empty()) {
 		std::ostringstream err;
 		err << "FastLanesReader: no row-groups found in file \"" << file_path << "\"";
 		throw std::runtime_error(err.str());
 	}
 
-	const auto& first_column_descriptors = rowgroup_descriptors[0]->m_column_descriptors;
-	const idx_t column_count             = first_column_descriptors.size();
+	const auto& first_column_descriptors = rowgroup_descriptors->Get(0)->m_column_descriptors();
+	const idx_t column_count             = first_column_descriptors->size();
 
 	result.column_names.resize(column_count);
 	result.promoted_types.resize(column_count, DataType::INVALID);
 
-	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_descriptors.size(); ++rowgroup_idx) {
-		const auto& column_descriptors = rowgroup_descriptors[rowgroup_idx]->m_column_descriptors;
-		if (column_descriptors.size() != column_count) {
+	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_descriptors->size(); ++rowgroup_idx) {
+		const auto& column_descriptors = rowgroup_descriptors->Get(rowgroup_idx)->m_column_descriptors();
+		if (column_descriptors->size() != column_count) {
 			throw std::runtime_error("FastLanesReader: inconsistent column counts across row groups");
 		}
 
 		for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
-			const auto& column_descriptor = column_descriptors[col_idx];
-			const auto  current_type      = column_descriptor->data_type;
+			const auto& column_descriptor = column_descriptors->Get(col_idx);
+			const auto  current_type      = column_descriptor->data_type();
+			const auto  current_name      = column_descriptor->name()->c_str();
 
 			if (rowgroup_idx == 0) {
-				result.column_names[col_idx]   = column_descriptor->name;
+				result.column_names[col_idx]   = current_name;
 				result.promoted_types[col_idx] = current_type;
 				continue;
 			}
 
-			if (column_descriptor->name != result.column_names[col_idx]) {
+			if (current_name != result.column_names[col_idx]) {
 				std::ostringstream err;
-				err << "FastLanesReader: column index " << col_idx << " has name \"" << column_descriptor->name
+				err << "FastLanesReader: column index " << col_idx << " has name \"" << current_name
 				    << "\" but expected \"" << result.column_names[col_idx] << "\"";
 				throw std::runtime_error(err.str());
 			}

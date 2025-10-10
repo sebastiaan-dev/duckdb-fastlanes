@@ -13,10 +13,10 @@ class TableMetadata {
 public:
 	explicit TableMetadata(const std::string& path);
 
-	const fastlanes::TableDescriptorT&    Descriptor() const;
-	idx_t                                 RowGroupCount() const;
-	const fastlanes::RowgroupDescriptorT& RowGroupDescriptor(idx_t index) const;
-	const fastlanes::TableReader&         TableReader() const;
+	const fastlanes::TableDescriptor&    Descriptor() const;
+	idx_t                                RowGroupCount() const;
+	const fastlanes::RowgroupDescriptor& RowGroupDescriptor(idx_t index) const;
+	const fastlanes::TableReader&        TableReader() const;
 
 private:
 	fastlanes::Connection              conn;

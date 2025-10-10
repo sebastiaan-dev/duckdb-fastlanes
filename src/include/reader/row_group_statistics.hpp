@@ -24,7 +24,7 @@ public:
 
 	RowGroupStatistics();
 
-	void Initialize(const fastlanes::TableDescriptorT&       table_descriptor,
+	void Initialize(const fastlanes::TableDescriptor&        table_descriptor,
 	                const vector<MultiFileColumnDefinition>& definitions);
 
 	const Value* GetStatistic(idx_t rowgroup_idx, idx_t column_idx, StatKey key) const;
@@ -45,9 +45,9 @@ public:
 	}
 
 private:
-	Value ExtractColumnStatistic(const fastlanes::ColumnDescriptorT& column_descriptor,
-	                             const LogicalType&                  logical_type,
-	                             StatKey                             statistic_key) const;
+	static Value ExtractColumnStatistic(const fastlanes::ColumnDescriptor& column_descriptor,
+	                                    const LogicalType&                 logical_type,
+	                                    StatKey                            statistic_key);
 
 private:
 	std::vector<std::vector<ColumnStats>> stats_;

@@ -96,7 +96,7 @@ void FastLanesReader::GetPartitionStats(vector<PartitionStatistics>& result) con
 
 		PartitionStatistics partition_stats;
 		partition_stats.row_start  = offset;
-		partition_stats.count      = rg_descriptor.m_n_tuples;
+		partition_stats.count      = rg_descriptor.m_n_tuples();
 		partition_stats.count_type = CountType::COUNT_EXACT;
 		offset += partition_stats.count;
 		result.emplace_back(partition_stats);
@@ -185,7 +185,7 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	// Prepare the local state of the current worker by assigning it a row group.
 	local_state.cur_rowgroup     = rowgroups_to_scan[global_state.next_rowgroup];
 	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
-	local_state.row_group_base = row_group_offsets[local_state.cur_rowgroup];
+	local_state.row_group_base   = row_group_offsets[local_state.cur_rowgroup];
 	// Reset the row group related local state.
 	local_state.cur_vector = 0;
 
@@ -306,8 +306,9 @@ void FastLanesReader::Scan(ClientContext& context,
 					expr->PointTo(vector_idx);
 					auto& op = expr->operators[expr->operators.size() - 1];
 
-					auto src_type =
-					    rowgroup_descriptor.m_column_descriptors[column_ids[MultiFileLocalIndex(i)].GetId()]->data_type;
+					const auto& src_type = rowgroup_descriptor.m_column_descriptors()
+					                           ->Get(column_ids[MultiFileLocalIndex(i)].GetId())
+					                           ->data_type();
 
 					if (batch_idx == 0) {
 						local_state.column_decoders[i]->Decode<materializer::Pass::First>(

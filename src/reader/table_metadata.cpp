@@ -15,19 +15,19 @@ TableMetadata::TableMetadata(const std::string& path) {
 	table_reader                    = make_uniq<fastlanes::TableReader>(full_path, conn);
 }
 
-const fastlanes::TableDescriptorT& TableMetadata::Descriptor() const {
+const fastlanes::TableDescriptor& TableMetadata::Descriptor() const {
 	return table_reader->get_descriptor();
 }
 
 idx_t TableMetadata::RowGroupCount() const {
-	return table_reader->get_descriptor().m_rowgroup_descriptors.size();
+	return table_reader->get_descriptor().m_rowgroup_descriptors()->size();
 }
 
-const fastlanes::RowgroupDescriptorT& TableMetadata::RowGroupDescriptor(idx_t index) const {
-	if (index >= table_reader->get_descriptor().m_rowgroup_descriptors.size()) {
+const fastlanes::RowgroupDescriptor& TableMetadata::RowGroupDescriptor(idx_t index) const {
+	if (index >= table_reader->get_descriptor().m_rowgroup_descriptors()->size()) {
 		throw std::out_of_range("Row group index out of bounds");
 	}
-	return *table_reader->get_descriptor().m_rowgroup_descriptors[index];
+	return *table_reader->get_descriptor().m_rowgroup_descriptors()->Get(index);
 }
 
 const fastlanes::TableReader& TableMetadata::TableReader() const {

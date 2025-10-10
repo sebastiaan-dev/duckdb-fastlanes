@@ -15,12 +15,12 @@ struct SchemaBuildResult {
 
 class SchemaBuilder {
 public:
-	SchemaBuilder(const fastlanes::TableDescriptorT& table_descriptor_p, const std::string& file_path_p);
+	SchemaBuilder(const fastlanes::TableDescriptor& table_descriptor_p, const std::string& file_path_p);
 
 	SchemaBuildResult Build() const;
 
 private:
-	const fastlanes::TableDescriptorT& table_descriptor;
+	const fastlanes::TableDescriptor& table_descriptor;
 	const std::string&                 file_path;
 };
 

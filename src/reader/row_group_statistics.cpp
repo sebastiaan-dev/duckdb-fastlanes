@@ -1,5 +1,4 @@
 #include "reader/row_group_statistics.hpp"
-#include "duckdb/common/assert.hpp"
 #include "duckdb/common/exception.hpp"
 #include <duckdb/common/multi_file/multi_file_data.hpp>
 #include <fls/footer/table_descriptor_generated.h>
@@ -19,9 +18,9 @@ std::optional<T> ReadBinaryAs(const fastlanes::BinaryValueT& binary) {
 }
 
 template <typename T>
-void ReadDecimal(Value& base_value, const fastlanes::DecimalTypeT& dtype, const fastlanes::BinaryValueT& binary) {
-	const auto width = static_cast<int8_t>(dtype.precision);
-	const auto scale = static_cast<int8_t>(dtype.scale);
+void ReadDecimal(Value& base_value, const fastlanes::DecimalType& dtype, const fastlanes::BinaryValueT& binary) {
+	const auto width = static_cast<int8_t>(dtype.precision());
+	const auto scale = static_cast<int8_t>(dtype.scale());
 
 	if (const auto value = ReadBinaryAs<T>(binary)) {
 		base_value = Value::DECIMAL(static_cast<int64_t>(*value), width, scale);
@@ -36,17 +35,17 @@ void BinaryIntoValue(Value& base_value, const fastlanes::BinaryValueT& binary, V
 }
 
 template <typename T>
-void ReadNumericalStats(bool                                is_decimal,
-                        ColumnStats&                        column_statistics,
-                        const fastlanes::ColumnDescriptorT& column_descriptor,
+void ReadNumericalStats(bool                               is_decimal,
+                        ColumnStats&                       column_statistics,
+                        const fastlanes::ColumnDescriptor& column_descriptor,
                         Value (*f)(T)) {
 	auto&       c_max = column_statistics.max;
 	auto&       c_min = column_statistics.min;
-	const auto& b_max = *column_descriptor.max.get();
-	const auto& b_min = *column_descriptor.min.get();
+	const auto& b_max = *column_descriptor.max()->UnPack();
+	const auto& b_min = *column_descriptor.min()->UnPack();
 
 	if (is_decimal) {
-		const auto dtype_info = *column_descriptor.fix_me_decimal_type;
+		const auto& dtype_info = *column_descriptor.fix_me_decimal_type();
 
 		ReadDecimal<T>(c_max, dtype_info, b_max);
 		ReadDecimal<T>(c_min, dtype_info, b_min);
@@ -55,10 +54,10 @@ void ReadNumericalStats(bool                                is_decimal,
 	BinaryIntoValue<T>(c_min, b_min, f);
 }
 
-void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptorT& descriptor) {
-	const auto is_decimal = descriptor.fix_me_decimal_type != nullptr;
+void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptor& descriptor) {
+	const auto is_decimal = descriptor.fix_me_decimal_type() != nullptr;
 
-	switch (descriptor.data_type) {
+	switch (descriptor.data_type()) {
 	case fastlanes::DataType::INT8: {
 		ReadNumericalStats<int8_t>(is_decimal, stats, descriptor, Value::TINYINT);
 		break;
@@ -119,7 +118,7 @@ void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptorT&
 		break;
 	}
 	default: {
-		std::cout << fastlanes::ToStr(descriptor.data_type) << " is not a valid data type." << std::endl;
+		std::cout << fastlanes::ToStr(descriptor.data_type()) << " is not a valid data type." << std::endl;
 		throw InternalException("ExtractStatisticSet: unknown data type");
 	}
 	}
@@ -127,22 +126,22 @@ void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptorT&
 
 RowGroupStatistics::RowGroupStatistics() = default;
 
-void RowGroupStatistics::Initialize(const fastlanes::TableDescriptorT&       table_descriptor,
+void RowGroupStatistics::Initialize(const fastlanes::TableDescriptor&        table_descriptor,
                                     const vector<MultiFileColumnDefinition>& definitions) {
-	const auto rowgroup_count = table_descriptor.m_rowgroup_descriptors.size();
+	const auto rowgroup_count = table_descriptor.m_rowgroup_descriptors()->size();
 	stats_.clear();
 	stats_.resize(rowgroup_count);
 
 	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_count; ++rowgroup_idx) {
-		auto& rowgroup_desc      = *table_descriptor.m_rowgroup_descriptors[rowgroup_idx];
-		auto& column_descriptors = rowgroup_desc.m_column_descriptors;
-		stats_[rowgroup_idx].resize(column_descriptors.size());
+		auto&       rowgroup_desc      = *table_descriptor.m_rowgroup_descriptors()->Get(rowgroup_idx);
+		const auto& column_descriptors = rowgroup_desc.m_column_descriptors();
+		stats_[rowgroup_idx].resize(column_descriptors->size());
 
-		for (idx_t col_idx = 0; col_idx < column_descriptors.size(); ++col_idx) {
+		for (idx_t col_idx = 0; col_idx < column_descriptors->size(); ++col_idx) {
 			if (col_idx >= definitions.size()) {
 				throw InternalException("RowGroupStatistics: column definitions do not match descriptor size");
 			}
-			const auto& column_descriptor = *column_descriptors[col_idx];
+			const auto& column_descriptor = *column_descriptors->Get(col_idx);
 			auto&       column_statistics = stats_[rowgroup_idx][col_idx];
 
 			ExtractStatisticSet(column_statistics, column_descriptor);
@@ -169,14 +168,14 @@ RowGroupStatistics::GetStatistic(const idx_t rowgroup_idx, const idx_t column_id
 	}
 }
 
-Value RowGroupStatistics::ExtractColumnStatistic(const fastlanes::ColumnDescriptorT& column_descriptor,
-                                                 const LogicalType&                  logical_type,
-                                                 const StatKey                       statistic_key) const {
+Value RowGroupStatistics::ExtractColumnStatistic(const fastlanes::ColumnDescriptor& column_descriptor,
+                                                 const LogicalType&                 logical_type,
+                                                 const StatKey                      statistic_key) {
 	const fastlanes::BinaryValueT* statistic_binary = nullptr;
 	if (statistic_key == StatKey::Max) {
-		statistic_binary = column_descriptor.max.get();
+		statistic_binary = column_descriptor.max()->UnPack();
 	} else if (statistic_key == StatKey::Min) {
-		statistic_binary = column_descriptor.min.get();
+		statistic_binary = column_descriptor.min()->UnPack();
 	} else {
 		return Value();
 	}
@@ -186,11 +185,11 @@ Value RowGroupStatistics::ExtractColumnStatistic(const fastlanes::ColumnDescript
 	}
 
 	Value base_value;
-	if (auto& dtype = column_descriptor.fix_me_decimal_type) {
-		auto width = static_cast<int8_t>(dtype->precision);
-		auto scale = static_cast<int8_t>(dtype->scale);
+	if (const auto& dtype = column_descriptor.fix_me_decimal_type()) {
+		auto width = static_cast<int8_t>(dtype->precision());
+		auto scale = static_cast<int8_t>(dtype->scale());
 
-		switch (column_descriptor.data_type) {
+		switch (column_descriptor.data_type()) {
 		case fastlanes::DataType::INT16: {
 			if (auto value = ReadBinaryAs<int16_t>(*statistic_binary)) {
 				base_value = Value::DECIMAL(*value, width, scale);
@@ -243,7 +242,7 @@ Value RowGroupStatistics::ExtractColumnStatistic(const fastlanes::ColumnDescript
 			throw InternalException("RowGroupStatistics: cannot parse physical type into decimal.");
 		}
 	} else {
-		switch (column_descriptor.data_type) {
+		switch (column_descriptor.data_type()) {
 		case fastlanes::DataType::INT8: {
 			if (auto value = ReadBinaryAs<int8_t>(*statistic_binary)) {
 				base_value = Value::TINYINT(*value);

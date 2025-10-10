@@ -67,9 +67,9 @@ struct KernelTraits<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> {
 	                   idx_t,
 	                   fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>& op,
 	                   fastlanes::DataType&                       src_type) {
-		const auto* bytes   = op.key_segment_view.data_span.data();
+		// const auto* bytes   = op.key_segment_view.data_span.data();
 		const auto* index_p = op.Index();
-		const auto  size    = op.key_segment_view.data_span.size();
+		// const auto  size    = op.key_segment_view.data_span.size();
 		// std::cout << "DuckDB type: " << EnumUtil::ToString(col.GetType().InternalType()) << "\n";
 		// std::cout << "Descriptor type: " << fastlanes::ToStr(src_type) << "\n";
 		// print_type<KEY_PT>();

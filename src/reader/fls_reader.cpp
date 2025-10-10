@@ -49,9 +49,12 @@ void FastLanesReader::Initialize() {
 	columns.reserve(column_names.size());
 	for (idx_t col_idx = 0; col_idx < column_names.size(); ++col_idx) {
 		// If we are dealing with a decimal column we skip the promoted type.
-		if (const auto& dtype =
-		        descriptor.m_rowgroup_descriptors[0]->m_column_descriptors[col_idx]->fix_me_decimal_type) {
-			columns.emplace_back(column_names[col_idx], LogicalType::DECIMAL(dtype->precision, dtype->scale));
+		if (const auto& dtype = descriptor.m_rowgroup_descriptors()
+		                            ->Get(0)
+		                            ->m_column_descriptors()
+		                            ->Get(col_idx)
+		                            ->fix_me_decimal_type()) {
+			columns.emplace_back(column_names[col_idx], LogicalType::DECIMAL(dtype->precision(), dtype->scale()));
 			continue;
 		}
 
@@ -64,9 +67,9 @@ void FastLanesReader::Initialize() {
 	for (idx_t rowgroup_idx = 0; rowgroup_idx < table_metadata->RowGroupCount(); ++rowgroup_idx) {
 		row_group_offsets.push_back(cumulative_offset);
 		auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(rowgroup_idx);
-		total_tuples += rowgroup_descriptor.m_n_tuples;
-		total_vectors += rowgroup_descriptor.m_n_vec;
-		cumulative_offset += rowgroup_descriptor.m_n_tuples;
+		total_tuples += rowgroup_descriptor.m_n_tuples();
+		total_vectors += rowgroup_descriptor.m_n_vec();
+		cumulative_offset += rowgroup_descriptor.m_n_tuples();
 	}
 
 	rowgroup_statistics.Initialize(descriptor, columns);
@@ -77,7 +80,7 @@ void FastLanesReader::EnsureFileRowNumberColumn() {
 		return;
 	}
 	MultiFileColumnDefinition result("file_row_number", LogicalType::BIGINT);
-	result.identifier = Value::INTEGER(MultiFileReader::ORDINAL_FIELD_ID);
+	result.identifier         = Value::INTEGER(MultiFileReader::ORDINAL_FIELD_ID);
 	file_row_number_local_idx = optional_idx(columns.size());
 	columns.push_back(std::move(result));
 	reader_options.file_row_number = true;
@@ -182,16 +185,15 @@ unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext& context
 		return nullptr;
 	}
 
-	const auto&                type = columns[file_col_idx].type;
+	const auto& type = columns[file_col_idx].type;
 	if (IsFileRowNumberColumn(file_col_idx)) {
 		unique_ptr<BaseStatistics> column_stats;
 		for (idx_t row_group_idx = 0; row_group_idx < table_metadata->RowGroupCount(); row_group_idx++) {
-			auto chunk_stats = NumericStats::CreateUnknown(type);
+			auto  chunk_stats      = NumericStats::CreateUnknown(type);
 			idx_t row_group_offset = row_group_offsets[row_group_idx];
-			idx_t row_group_count = table_metadata->RowGroupDescriptor(row_group_idx).m_n_tuples;
+			idx_t row_group_count  = table_metadata->RowGroupDescriptor(row_group_idx).m_n_tuples();
 			NumericStats::SetMin(chunk_stats, Value::BIGINT(static_cast<int64_t>(row_group_offset)));
-			NumericStats::SetMax(
-			    chunk_stats, Value::BIGINT(static_cast<int64_t>(row_group_offset + row_group_count)));
+			NumericStats::SetMax(chunk_stats, Value::BIGINT(static_cast<int64_t>(row_group_offset + row_group_count)));
 			chunk_stats.Set(StatsInfo::CANNOT_HAVE_NULL_VALUES);
 			auto chunk_stats_unique = chunk_stats.ToUnique();
 			if (!column_stats) {
@@ -228,12 +230,12 @@ idx_t FastLanesReader::GetNRowGroups() const {
 
 idx_t FastLanesReader::GetNVectors(const idx_t row_group_idx) const {
 	const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(row_group_idx);
-	return rowgroup_descriptor.m_n_vec;
+	return rowgroup_descriptor.m_n_vec();
 }
 
 idx_t FastLanesReader::GetNTuples(const idx_t row_group_idx) const {
 	const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(row_group_idx);
-	return rowgroup_descriptor.m_n_tuples;
+	return rowgroup_descriptor.m_n_tuples();
 }
 
 size_t FastLanesReader::GetTotalTuples() const {
@@ -262,8 +264,8 @@ fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(c
 const std::vector<idx_t>& FastLanesReader::GetRowGroupsToScan() {
 	rowgroup_filter_catalog.Initialize(rowgroup_statistics, filters.get(), column_indexes);
 	if (file_row_number_local_idx.IsValid()) {
-		rowgroup_filter_catalog.SetRowIdInfo(&row_group_offsets, static_cast<idx_t>(total_tuples),
-		                                     file_row_number_local_idx);
+		rowgroup_filter_catalog.SetRowIdInfo(
+		    &row_group_offsets, static_cast<idx_t>(total_tuples), file_row_number_local_idx);
 	} else {
 		rowgroup_filter_catalog.SetRowIdInfo(nullptr, static_cast<idx_t>(total_tuples), optional_idx());
 	}
