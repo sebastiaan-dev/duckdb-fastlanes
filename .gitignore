@@ -19,6 +19,7 @@ flake.nix
 flake.nix.*
 flake.lock
 
+temp/
 benchmark/data/
 benchmark/queries/
 benchmark/results/
