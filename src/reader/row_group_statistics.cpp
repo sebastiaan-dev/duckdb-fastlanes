@@ -29,7 +29,7 @@ void ReadDecimal(Value& base_value, const fastlanes::DecimalType& dtype, const f
 
 template <typename T>
 void BinaryIntoValue(Value& base_value, const fastlanes::BinaryValueT& binary, Value (*f)(T)) {
-	if (const auto value = ReadBinaryAs<int8_t>(binary)) {
+	if (const auto value = ReadBinaryAs<T>(binary)) {
 		base_value = f(*value);
 	}
 }
@@ -49,9 +49,10 @@ void ReadNumericalStats(bool                               is_decimal,
 
 		ReadDecimal<T>(c_max, dtype_info, b_max);
 		ReadDecimal<T>(c_min, dtype_info, b_min);
+	} else {
+		BinaryIntoValue<T>(c_max, b_max, f);
+		BinaryIntoValue<T>(c_min, b_min, f);
 	}
-	BinaryIntoValue<T>(c_max, b_max, f);
-	BinaryIntoValue<T>(c_min, b_min, f);
 }
 
 void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptor& descriptor) {
