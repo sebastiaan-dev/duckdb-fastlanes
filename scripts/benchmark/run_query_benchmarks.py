@@ -14,6 +14,7 @@ The script:
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import sys
 import time
@@ -136,7 +137,24 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--iterations",
         type=int,
         default=1,
-        help="Number of measured runs per query (default: 1).",
+        help="Fixed number of iterations per query (ignored when --mean-relative-error is provided).",
+    )
+    parser.add_argument(
+        "--min-iterations",
+        type=int,
+        default=1,
+        help="Minimum number of iterations before convergence can be evaluated (only used with --mean-relative-error).",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        help="Maximum number of iterations when using --mean-relative-error (defaults to value of --iterations).",
+    )
+    parser.add_argument(
+        "--mean-relative-error",
+        type=float,
+        help="Enable mean-based stopping when the relative standard error (stddev/sqrt(n))/mean "
+        "falls below this threshold. Requires at least two successful runs.",
     )
     parser.add_argument(
         "--limit",
@@ -343,6 +361,17 @@ def quote_identifier(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+def relative_standard_error(samples: Sequence[float]) -> float:
+    if len(samples) < 2:
+        return math.inf
+    mean = sum(samples) / len(samples)
+    if mean == 0:
+        return math.inf
+    variance = sum((value - mean) ** 2 for value in samples) / (len(samples) - 1)
+    stddev = math.sqrt(variance)
+    return (stddev / math.sqrt(len(samples))) / mean
+
+
 def execute_query_run(
     run_conn: duckdb.DuckDBPyConnection,
     meta_conn: duckdb.DuckDBPyConnection,
@@ -436,10 +465,29 @@ def run_benchmarks(args: argparse.Namespace) -> None:
             print("No queries matched the requested filters; nothing to do.")
             return
 
+        if args.iterations <= 0:
+            raise ValueError("--iterations must be a positive integer")
+        if args.min_iterations <= 0:
+            raise ValueError("--min-iterations must be a positive integer")
+
+        dynamic_iterations = args.mean_relative_error is not None
+        if dynamic_iterations:
+            if args.mean_relative_error <= 0:
+                raise ValueError("--mean-relative-error must be positive")
+            min_iterations = max(args.min_iterations, 2)
+            max_iterations = args.max_iterations or max(args.iterations, min_iterations)
+        else:
+            min_iterations = max(args.iterations, 1)
+            max_iterations = min_iterations
+        if max_iterations < min_iterations:
+            raise ValueError(
+                "--max-iterations must be greater than or equal to --min-iterations"
+            )
+
         files = fetch_files(meta_conn, metadata_path)
         grouped = group_queries(queries, require_copy=target_dir is not None)
 
-        total_runs = len(queries) * args.iterations
+        estimated_total_runs = len(queries) * max_iterations
         success_count = 0
         failure_count = 0
         elapsed_samples: List[float] = []
@@ -476,16 +524,22 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                     views = attach_duckdb_tables(run_conn, file_entries, replacements)
                     try:
                         for query in group:
-                            for iteration in range(1, args.iterations + 1):
+                            iteration = 0
+                            elapsed_history: List[float] = []
+                            while True:
+                                iteration += 1
                                 run_index += 1
                                 sql = rewrite_query(
                                     query.sql, file_entries, replacements
                                 )
                                 configure_connection(run_conn, query)
                                 summary = (
-                                    f"[{run_index}/{total_runs}] Query {query.id.hex[:8]} "
-                                    f"type={query.type} iter={iteration} threads={query.thread_count}"
+                                    f"[{run_index}/{estimated_total_runs}] Query {query.id.hex[:8]} "
+                                    f"type={query.type} iter={iteration}"
                                 )
+                                if dynamic_iterations:
+                                    summary += f"/{max_iterations}"
+                                summary += f" threads={query.thread_count}"
                                 print(f"{summary} - executing...", flush=True)
                                 success, elapsed_ms, profile_path, error_message = execute_query_run(
                                     run_conn,
@@ -499,6 +553,7 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                     success_count += 1
                                     if elapsed_ms is not None:
                                         elapsed_samples.append(elapsed_ms)
+                                        elapsed_history.append(elapsed_ms)
                                     if elapsed_ms is not None:
                                         print(
                                             f"{summary} - completed in {elapsed_ms:.2f} ms "
@@ -517,6 +572,41 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                         file=sys.stderr,
                                         flush=True,
                                     )
+                                if dynamic_iterations:
+                                    converged = False
+                                    relative_error: Optional[float] = None
+                                    if len(elapsed_history) >= min_iterations and len(elapsed_history) >= 2:
+                                        relative_error = relative_standard_error(
+                                            elapsed_history
+                                        )
+                                        if math.isfinite(relative_error) and relative_error <= args.mean_relative_error:
+                                            print(
+                                                f"    -> convergence reached after {iteration} iterations "
+                                                f"(relative stderr {relative_error:.4f})",
+                                                flush=True,
+                                            )
+                                            break
+                                    if iteration >= max_iterations:
+                                        if relative_error is None and len(elapsed_history) >= 2:
+                                            relative_error = relative_standard_error(
+                                                elapsed_history
+                                            )
+                                        if relative_error is not None and math.isfinite(relative_error):
+                                            print(
+                                                f"    -> reached max iterations ({iteration}); "
+                                                f"relative stderr {relative_error:.4f}",
+                                                flush=True,
+                                            )
+                                        else:
+                                            print(
+                                                f"    -> reached max iterations ({iteration}); "
+                                                f"insufficient successful runs for error estimate",
+                                                flush=True,
+                                            )
+                                        break
+                                else:
+                                    if iteration >= max_iterations:
+                                        break
                     finally:
                         detach_duckdb_tables(run_conn, views)
                 finally:
@@ -527,7 +617,10 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                         shutil.rmtree(cleanup_root, ignore_errors=True)
 
         total_elapsed = time.perf_counter() - overall_start
-        print(f"Completed {run_index} benchmark runs in {total_elapsed:.2f} s.")
+        print(
+            f"Completed {run_index} benchmark runs "
+            f"(estimated maximum {estimated_total_runs}) in {total_elapsed:.2f} s."
+        )
         print(
             f"  Successful runs: {success_count}, Failed runs: {failure_count}",
             flush=True,
@@ -546,13 +639,11 @@ def run_benchmarks(args: argparse.Namespace) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
-    if args.target_dir is None and args.ram_disk == "true":
-        print(
-            "Ram disk filter requires --target-dir to copy data files.",
-            file=sys.stderr,
-        )
+    try:
+        run_benchmarks(args)
+    except (ValueError, RuntimeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    run_benchmarks(args)
 
 
 if __name__ == "__main__":
