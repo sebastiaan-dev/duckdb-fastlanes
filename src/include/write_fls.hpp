@@ -12,7 +12,7 @@ public:
 	 *
 	 * @param db The currently running DuckDB database instance.
 	 */
-	static void Register(DatabaseInstance &db);
+	static void Register(ExtensionLoader &loader);
 };
 
 } // namespace duckdb

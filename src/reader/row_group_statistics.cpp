@@ -119,7 +119,6 @@ void ExtractStatisticSet(ColumnStats& stats, const fastlanes::ColumnDescriptor& 
 		break;
 	}
 	default: {
-		std::cout << fastlanes::ToStr(descriptor.data_type()) << " is not a valid data type." << std::endl;
 		throw InternalException("ExtractStatisticSet: unknown data type");
 	}
 	}

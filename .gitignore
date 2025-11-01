@@ -15,11 +15,10 @@ vcpkg_installed/
 .envrc
 .envrc.*
 
-flake.nix
-flake.nix.*
-flake.lock
+.ccache
 
 temp/
 benchmark/data/
+benchmark/datav2/
 benchmark/queries/
 benchmark/results/

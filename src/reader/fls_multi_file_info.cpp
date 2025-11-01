@@ -8,8 +8,7 @@
 
 namespace duckdb {
 
-unique_ptr<MultiFileReaderInterface>
-FastLanesMultiFileInfo::InitializeInterface(ClientContext& context, MultiFileReader& reader, MultiFileList& file_list) {
+unique_ptr<MultiFileReaderInterface> FastLanesMultiFileInfo::CreateInterface(ClientContext& context) {
 	return make_uniq<FastLanesMultiFileInfo>();
 }
 

@@ -9,6 +9,7 @@
 #include "fls_gen/untranspose/untranspose.hpp"
 #include <array>
 #include <cstring>
+#include <iostream>
 #include <type_traits>
 
 namespace duckdb::materializer {
@@ -16,6 +17,20 @@ namespace duckdb::materializer {
 enum class Pass : bool { First = false, Second = true };
 
 namespace detail {
+
+template <typename SRC, typename DEST>
+void CastNumeric(const SRC* __restrict src, DEST* __restrict dest, uint64_t count) {
+	// if constexpr (std::is_same_v<std::make_unsigned_t<SRC>, std::make_unsigned_t<DEST>> &&
+	//               sizeof(SRC) == sizeof(DEST)) {
+	// 	std::memcpy(dest, src, count * sizeof(SRC));
+	// 	return;
+	// }
+
+#pragma clang loop vectorize(enable) interleave(enable)
+	for (uint64_t i = 0; i < count; ++i) {
+		dest[i] = static_cast<DEST>(src[i]);
+	}
+}
 
 template <typename T>
 inline T LoadValue(const void* ptr) {
@@ -89,15 +104,17 @@ struct NumericHelper {
 
 	template <typename SRC, typename DEST>
 	static void CastAndStore(const SRC* src, DEST* dest) {
-		for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
-			DEST cast_value;
-			if (!TryCast::Operation<SRC, DEST>(src[i], cast_value, true)) {
-				throw ConversionException("Materializer cannot safely cast from physical type " +
-				                          EnumUtil::ToString(GetTypeId<SRC>()) + " to " +
-				                          EnumUtil::ToString(GetTypeId<DEST>()));
-			}
-			dest[i] = cast_value;
-		}
+		CastNumeric(src, dest, fastlanes::CFG::VEC_SZ);
+
+		// for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
+		// 	DEST cast_value;
+		// 	if (!TryCast::Operation<SRC, DEST>(src[i], cast_value, true)) {
+		// 		throw ConversionException("Materializer cannot safely cast from physical type " +
+		// 		                          EnumUtil::ToString(GetTypeId<SRC>()) + " to " +
+		// 		                          EnumUtil::ToString(GetTypeId<DEST>()));
+		// 	}
+		// 	dest[i] = cast_value;
+		// }
 	}
 
 	template <typename SRC>
@@ -132,10 +149,19 @@ struct NumericHelper {
 		const auto source_physical = GetTypeId<SRC>();
 		if (physical_type == source_physical) {
 			auto dest = GetDataPtr<SRC>(col);
+#if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
+			fastlanes::copy<SRC>(transposed, dest);
+#else
 			generated::untranspose::fallback::scalar::untranspose_i(transposed, dest);
+#endif
 			return;
 		}
+
+#if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
+		DispatchNumericPhysicalType(physical_type, CopyVisitor<PASS, SRC> {transposed, col});
+#else
 		DispatchNumericPhysicalType(physical_type, UntransposeVisitor<PASS, SRC> {transposed, col});
+#endif
 	}
 };
 
@@ -147,7 +173,7 @@ struct CopyVisitor {
 	template <typename DEST>
 	void operator()() const {
 		if constexpr (std::is_unsigned_v<SRC> && std::is_signed_v<DEST> && sizeof(SRC) == sizeof(DEST)) {
-			auto dest = NumericHelper<PASS>::template GetDataPtr<SRC>(col);
+			auto dest = NumericHelper<PASS>::template GetDataPtr<DEST>(col);
 			fastlanes::copy<SRC>(src, dest);
 			return;
 		}
@@ -171,6 +197,7 @@ struct AssignVisitor {
 			                          EnumUtil::ToString(GetTypeId<SRC>()) + " to " +
 			                          EnumUtil::ToString(GetTypeId<DEST>()));
 		}
+
 		auto dest_ptr   = NumericHelper<PASS>::template GetDataPtr<DEST>(col);
 		dest_ptr[index] = cast_value;
 	}

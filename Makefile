@@ -1,6 +1,13 @@
+.PHONY: ramdisk remove-ramdisk clean generate-data generate-vis build-fls-generator vortex-extension vortex-clean vortex-fetch
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-TPCH_SCALE_FACTORS ?= 1
+TPCH_SCALE_FACTORS ?= 1 10 30
+
+VORTEX_REPO_URL := https://github.com/vortex-data/duckdb-vortex.git
+VORTEX_COMMIT := 9ea698117199440f62a7cf1673afb647dc6437c7
+VORTEX_SRC_DIR := ${PROJ_DIR}build/duckdb-vortex
+VORTEX_EXTENSION_BUILD := ${VORTEX_SRC_DIR}/build/release/extension/vortex/vortex.duckdb_extension
+VORTEX_EXTENSION_TARGET := ${PROJ_DIR}build/release/extension/vortex/vortex.duckdb_extension
 
 # Configuration of extension
 EXT_NAME=fastlanes
@@ -15,13 +22,106 @@ include extension-ci-tools/makefiles/duckdb_extension.Makefile
 
 include benchmark/Makefile
 
+#
+# Benchmark configuration
+#
+
+# WARNING: This should not be equal to or exceed the RAM capacity of the device.
+RAMDISK_SIZE ?= 1024 * 13
+RAMDISK_LABEL := fls-ramdisk
+UNAME_S := $(shell uname -s)
+
+ramdisk:
+ifeq ($(UNAME_S),Darwin)
+	@TOTAL_BYTES=$$(sysctl -n hw.memsize); \
+	TOTAL_MB=$$(( TOTAL_BYTES / 1024 / 1024 )); \
+	if [ $$(( TOTAL_MB - $(RAMDISK_SIZE) )) -lt 4096 ]; then \
+	  echo "Error: RAMDISK_SIZE=$(RAMDISK_SIZE)MiB leaves less than 4096MiB free (total=$$TOTAL_MB MiB)."; \
+	  exit 1; \
+	fi;
+
+	@echo "[MacOS] Creating $(RAMDISK_SIZE)MiB RAM disk: $(RAMDISK_LABEL)"
+	@diskutil erasevolume EXFAT "$(RAMDISK_LABEL)" $$(hdiutil attach -nomount ram://$$(( $(RAMDISK_SIZE) * 2048 )))
+	@echo "[MacOS] Mounted at /Volumes/$(RAMDISK_LABEL)"
+else ifeq ($(UNAME_S),Linux)
+	@TOTAL_KB=$$(awk '/MemTotal:/ {print $$2}' /proc/meminfo); \
+	TOTAL_MB=$$(( TOTAL_KB / 1024 )); \
+	if [ $$(( TOTAL_MB - $(RAMDISK_SIZE) )) -lt 4096 ]; then \
+	  echo "Error: RAMDISK_SIZE=$(RAMDISK_SIZE)MiB leaves less than 4096MiB free (total=$$TOTAL_MB MiB)."; \
+	  exit 1; \
+	fi;
+
+	@echo "[Linux] Creating RAM disk: $(RAMDISK_SIZE) MB at /dev/ram$(RD_INDEX)"
+	@sudo modprobe brd rd_size=$(shell echo $$(( $(RAMDISK_SIZE) * 1024 ))) max_part=1 rd_nr=1
+	@sudo mkfs.exfat /dev/ram0
+	@sudo mkdir /mnt/$(RAMDISK_LABEL)
+	@sudo mount /dev/ram0 /mnt/$(RAMDISK_LABEL)
+	@echo "[Linux] Mounted at /mnt/$(RAMDISK_LABEL)"
+else
+	$(error Unsupported OS: $(UNAME_S))
+endif
+
+remove-ramdisk:
+ifeq ($(UNAME_S),Darwin)
+	@echo "[MacOS] Cleaning RAM disk"
+	@diskutil eject   "/Volumes/$(RAMDISK_LABEL)" >/dev/null 2>&1 || true
+else ifeq ($(UNAME_S),Linux)
+	@echo "[Linux] Cleaning RAM disk"
+	@sudo umount /mnt/$(RAMDISK_LABEL) >/dev/null 2>&1 || true
+	@rmdir /mnt/$(RAMDISK_LABEL) >/dev/null 2>&1 || true
+	@sudo rmmod brd >/dev/null 2>&1 || true
+else
+	$(error Unsupported OS: $(UNAME_S))
+endif
+
+bench-set: ramdisk
+	python3 scripts/benchmark/run_query_benchmarks.py \
+		--mean-relative-error 0.05 \
+		--min-iterations 5 \
+		--max-iterations 60 \
+		--threads 2 \
+		--ram-disk true \
+		--target-dir /Volumes/fls-ramdisk \
+		--object-cache true \
+		--external-file-cache true \
+		--benchmarks tpch volumetric
+	@$(MAKE) remove-ramdisk
+
+generate-data-v2: vortex-extension
+	python3 scripts/benchmark/generate_tpch_datav2.py --scale-factors $(TPCH_SCALE_FACTORS) --file-formats parquet fls vortex duckdb
+
 build-fls-generator:
 	cmake --build build/release --target generate_fls -j 8
 
 generate-data: build-fls-generator
-	python3 -m pip install duckdb==v1.3.2
-	python3 scripts/data_generator/generate_test_data.py --scale-factors $(TPCH_SCALE_FACTORS)
+	python3 -m pip install duckdb==v1.4.0
+	python3 scripts/data_generator/generate_test_data.py --scale-factors $(TPCH_SCALE_FACTORS) --row-group-vectors 64
 	python3 scripts/data_generator/generate_tpch_benchmarks.py --scale-factors $(TPCH_SCALE_FACTORS)
 
 generate-vis:
 	python3 scripts/plot_query_timings.py --scale-factor $(TPCH_SCALE_FACTORS)
+
+vortex-fetch:
+	@echo "Ensuring duckdb-vortex sources at ${VORTEX_COMMIT}"
+	@if [ ! -d $(VORTEX_SRC_DIR)/.git ]; then \
+		rm -rf $(VORTEX_SRC_DIR); \
+		git clone --recurse-submodules $(VORTEX_REPO_URL) $(VORTEX_SRC_DIR); \
+	else \
+		cd $(VORTEX_SRC_DIR) && git fetch origin; \
+	fi
+	@cd $(VORTEX_SRC_DIR) && git checkout $(VORTEX_COMMIT)
+	@cd $(VORTEX_SRC_DIR) && git submodule update --init --recursive
+
+$(VORTEX_EXTENSION_BUILD): vortex-fetch
+	@echo "Building duckdb-vortex extension"
+	@$(MAKE) -C $(VORTEX_SRC_DIR) GEN=ninja release
+
+$(VORTEX_EXTENSION_TARGET): $(VORTEX_EXTENSION_BUILD)
+	@mkdir -p $(dir $(VORTEX_EXTENSION_TARGET))
+	@cp $(VORTEX_EXTENSION_BUILD) $(VORTEX_EXTENSION_TARGET)
+
+vortex-extension: $(VORTEX_EXTENSION_TARGET)
+
+vortex-clean:
+	@rm -rf $(VORTEX_SRC_DIR)
+	@rm -f $(VORTEX_EXTENSION_TARGET)

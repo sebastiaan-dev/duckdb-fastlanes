@@ -8,13 +8,14 @@ definitions. For now only volumetric queries are generated; TPC-H query
 generation will be added later but the schema already supports linking
 multiple file UUIDs to a single query entry.
 """
+
 from __future__ import annotations
 
 import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 import duckdb
@@ -23,15 +24,51 @@ import duckdb
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_METADATA = PROJECT_ROOT / "benchmark" / "datav2" / "metadata.duckdb"
+TPCH_QUERY_DIR = PROJECT_ROOT / "duckdb" / "extension" / "tpch" / "dbgen" / "queries"
 
 FASTLANES_EXTENSION = (
-    PROJECT_ROOT / "build" / "release" / "extension" / "fastlanes" / "fastlanes.duckdb_extension"
+    PROJECT_ROOT
+    / "build"
+    / "release"
+    / "extension"
+    / "fastlanes"
+    / "fastlanes.duckdb_extension"
 )
 VORTEX_EXTENSION = (
-    PROJECT_ROOT / "build" / "release" / "extension" / "vortex" / "vortex.duckdb_extension"
+    PROJECT_ROOT
+    / "build"
+    / "release"
+    / "extension"
+    / "vortex"
+    / "vortex.duckdb_extension"
 )
 
 VOLUMETRIC_BENCHMARK_SOURCES = {"volumetric", "tpch"}
+
+TPCH_QUERY_TABLES: Dict[str, Tuple[str, ...]] = {
+    "q01": ("lineitem",),
+    "q02": ("part", "supplier", "partsupp", "nation", "region"),
+    "q03": ("customer", "orders", "lineitem"),
+    "q04": ("orders", "lineitem"),
+    "q05": ("customer", "orders", "lineitem", "nation", "region", "supplier"),
+    "q06": ("lineitem",),
+    "q07": ("supplier", "lineitem", "orders", "customer", "nation"),
+    "q08": ("part", "supplier", "lineitem", "orders", "customer", "nation", "region"),
+    "q09": ("part", "partsupp", "supplier", "lineitem", "orders", "nation"),
+    "q10": ("customer", "orders", "lineitem", "nation"),
+    "q11": ("partsupp", "supplier", "nation"),
+    "q12": ("orders", "lineitem"),
+    "q13": ("customer", "orders"),
+    "q14": ("lineitem", "part"),
+    "q15": ("supplier", "lineitem"),
+    "q16": ("part", "partsupp", "supplier"),
+    "q17": ("lineitem", "part"),
+    "q18": ("customer", "orders", "lineitem"),
+    "q19": ("lineitem", "part"),
+    "q20": ("supplier", "nation", "partsupp", "part", "lineitem"),
+    "q21": ("supplier", "lineitem", "orders", "nation"),
+    "q22": ("customer", "orders"),
+}
 
 # Normalised type categories so we can pick suitable aggregation templates
 NUMERIC_BASE_TYPES = {
@@ -62,6 +99,16 @@ DATETIME_BASE_TYPES = {
 }
 STRING_BASE_TYPES = {"VARCHAR", "CHAR", "BPCHAR", "TEXT", "STRING"}
 BLOB_BASE_TYPES = {"BLOB", "VARBINARY", "BYTEA"}
+
+
+def load_tpch_sql_queries() -> Dict[str, str]:
+    queries: Dict[str, str] = {}
+    if not TPCH_QUERY_DIR.exists():
+        return queries
+    for path in sorted(TPCH_QUERY_DIR.glob("q*.sql")):
+        name = path.stem.lower()
+        queries[name] = path.read_text(encoding="utf-8").strip()
+    return queries
 
 
 @dataclass(frozen=True)
@@ -106,7 +153,9 @@ def load_extension(conn: duckdb.DuckDBPyConnection, path: Path, name: str) -> No
         raise RuntimeError(f"Failed to load DuckDB extension '{name}': {exc}") from exc
 
 
-def ensure_support_extensions(conn: duckdb.DuckDBPyConnection, formats: Iterable[str]) -> None:
+def ensure_support_extensions(
+    conn: duckdb.DuckDBPyConnection, formats: Iterable[str]
+) -> None:
     lower_formats = {fmt.lower() for fmt in formats}
     if "fls" in lower_formats:
         load_extension(conn, FASTLANES_EXTENSION, "fastlanes")
@@ -241,8 +290,10 @@ def column_definitions_for_file(
     conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     try:
         ensure_support_extensions(conn, formats_requiring_extensions)
-        fmt = file_entry.file_format
+
+        fmt = file_entry.file_format.lower()
         path_literal = escape_literal(str(file_entry.path))
+
         if fmt == "duckdb":
             alias = f"db_{file_entry.id.hex}"
             conn.execute(f"ATTACH '{path_literal}' AS {alias};")
@@ -253,29 +304,46 @@ def column_definitions_for_file(
             finally:
                 conn.execute(f"DETACH {alias};")
             return [{"name": row[1], "type": row[2]} for row in rows]
+
         if fmt == "parquet":
-            rows = conn.execute(
-                f"DESCRIBE SELECT * FROM read_parquet('{path_literal}')"
-            ).fetchall()
+            select_sql = f"SELECT * FROM read_parquet('{path_literal}')"
         elif fmt == "fls":
-            rows = conn.execute(
-                f"DESCRIBE SELECT * FROM read_fls('{path_literal}')"
-            ).fetchall()
+            select_sql = f"SELECT * FROM read_fls('{path_literal}')"
         elif fmt == "vortex":
-            rows = conn.execute(
-                f"DESCRIBE SELECT * FROM read_vortex('{path_literal}')"
-            ).fetchall()
+            select_sql = f"SELECT * FROM read_vortex('{path_literal}')"
+        elif fmt == "csv":
+            select_sql = f"SELECT * FROM read_csv_auto('{path_literal}')"
         else:
             raise RuntimeError(f"Unsupported file format '{file_entry.file_format}'.")
 
-        return [{"name": row[0], "type": row[1]} for row in rows]
+        try:
+            rows = conn.execute(f"DESCRIBE {select_sql}").fetchall()
+            return [{"name": row[0], "type": row[1]} for row in rows]
+        except duckdb.Error:
+            view_name = f"tmp_view_{file_entry.id.hex}"
+            try:
+                conn.execute(
+                    f"CREATE TEMP VIEW {quote_identifier(view_name)} AS {select_sql};"
+                )
+                rows = conn.execute(
+                    f"PRAGMA table_info({quote_identifier(view_name)});"
+                ).fetchall()
+                return [{"name": row[1], "type": row[2]} for row in rows]
+            except duckdb.Error as exc:
+                print(
+                    f"Warning: skipping schema extraction for '{file_entry.path}' "
+                    f"(format {file_entry.file_format}): {exc}"
+                )
+                return []
+            finally:
+                conn.execute(f"DROP VIEW IF EXISTS {quote_identifier(view_name)};")
     finally:
         conn.close()
 
 
 def table_expression(file_entry: FileEntry) -> str:
     literal = escape_literal(str(file_entry.path))
-    fmt = file_entry.file_format
+    fmt = file_entry.file_format.lower()
     if fmt == "duckdb":
         return quote_identifier(file_entry.table_name)
     if fmt == "parquet":
@@ -284,6 +352,8 @@ def table_expression(file_entry: FileEntry) -> str:
         return f"read_fls('{literal}')"
     if fmt == "vortex":
         return f"read_vortex('{literal}')"
+    if fmt == "csv":
+        return f"read_csv_auto('{literal}')"
     raise RuntimeError(f"Unsupported file format '{file_entry.file_format}'.")
 
 
@@ -319,6 +389,50 @@ def generate_volumetric_queries(
                         }
                     )
     return volumetric_queries
+
+
+def group_tpch_datasets(
+    files: Sequence[FileEntry],
+) -> Dict[Tuple[str, Optional[str], Optional[int]], Dict[str, FileEntry]]:
+    grouped: Dict[Tuple[str, Optional[str], Optional[int]], Dict[str, FileEntry]] = {}
+    for entry in files:
+        if entry.benchmark.lower() != "tpch":
+            continue
+        key = (entry.file_format.lower(), entry.sf, entry.rowgroup_size)
+        table_map = grouped.setdefault(key, {})
+        table_map[entry.table_name.lower()] = entry
+    return grouped
+
+
+def generate_tpch_queries(
+    files: Sequence[FileEntry],
+    configs: Sequence[QueryConfig],
+    tpch_sql: Dict[str, str],
+) -> List[Dict[str, object]]:
+    grouped = group_tpch_datasets(files)
+    tpch_entries: List[Dict[str, object]] = []
+    for key, table_map in grouped.items():
+        for query_name, required_tables in TPCH_QUERY_TABLES.items():
+            sql = tpch_sql.get(query_name)
+            if not sql:
+                continue
+            missing = [table for table in required_tables if table not in table_map]
+            if missing:
+                continue
+            file_ids = [table_map[table].id for table in required_tables]
+            for config in configs:
+                tpch_entries.append(
+                    {
+                        "type": "tpch",
+                        "sql": sql,
+                        "file_ids": file_ids,
+                        "ram_disk": config.ram_disk,
+                        "thread_count": config.thread_count,
+                        "object_cache": config.object_cache,
+                        "external_file_cache": config.external_file_cache,
+                    }
+                )
+    return tpch_entries
 
 
 def insert_queries(
@@ -362,8 +476,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if not files:
             print("No entries found in files table; nothing to do.")
             return
-
-        formats = {entry.file_format for entry in files}
         volumetric = [
             entry
             for entry in files
@@ -378,7 +490,17 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "No volumetric entries found in files table; skipping volumetric query generation."
             )
 
-        # Placeholder for future TPC-H generation
+        tpch_sql = load_tpch_sql_queries()
+        tpch_rows = generate_tpch_queries(files, configs, tpch_sql)
+        if tpch_rows:
+            insert_queries(conn, tpch_rows)
+        else:
+            if not tpch_sql:
+                print(
+                    f"TPC-H query directory '{TPCH_QUERY_DIR}' not found; skipping TPC-H query generation."
+                )
+            else:
+                print("No TPC-H datasets available for query generation.")
 
         total = conn.execute("SELECT COUNT(*) FROM queries;").fetchone()[0]
         print(f"Generated {total} query definitions.")

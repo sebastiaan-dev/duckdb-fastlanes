@@ -41,8 +41,12 @@ struct KernelTraits<fastlanes::dec_fsst_opr> {
 			fsst_buffer.AddHeapReference(make_buffer<KeepAlive>(std::move(encoded.owner)));
 		}
 
+#if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
+		// fastlanes::copy(opr.offset_arr, opr.untrasposed_offset);
 		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
-
+#else
+		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
+#endif
 		auto*            bytes    = reinterpret_cast<const char*>(encoded.span.data());
 		auto*            out      = GetCompressedStringPtr<PASS>(target_col);
 		fastlanes::ofs_t prev_end = 0;

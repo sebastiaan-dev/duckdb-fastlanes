@@ -13,15 +13,17 @@ The script:
 
 from __future__ import annotations
 
+import subprocess
 import argparse
 import math
+import os
 import shutil
 import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from uuid import UUID
 
 import duckdb
@@ -134,6 +136,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Optional subset of query types to include (defaults to all types).",
     )
     parser.add_argument(
+        "--benchmarks",
+        nargs="+",
+        choices=("tpch", "volumetric"),
+        help="Benchmark categories to include (defaults to all).",
+    )
+    parser.add_argument(
         "--iterations",
         type=int,
         default=1,
@@ -235,6 +243,31 @@ def fetch_files(
     return result
 
 
+def compute_entry_size(path: Path) -> int:
+    if path.is_dir():
+        total = 0
+        for root, _, files in os.walk(path):
+            for name in files:
+                file_path = Path(root) / name
+                try:
+                    total += file_path.stat().st_size
+                except FileNotFoundError:
+                    continue
+        return total
+    return path.stat().st_size
+
+
+def format_bytes(num_bytes: int) -> str:
+    if num_bytes <= 0:
+        return "0 B"
+    suffixes = ["B", "KiB", "MiB", "GiB", "TiB"]
+    value = float(num_bytes)
+    for suffix in suffixes:
+        if value < 1024.0 or suffix == suffixes[-1]:
+            return f"{value:.2f} {suffix}"
+        value /= 1024.0
+
+
 def bool_filter_matches(value: bool, option: str) -> bool:
     if option == "any":
         return True
@@ -256,6 +289,8 @@ def load_queries(
 
     selected: List[QuerySpec] = []
     allowed_types = {t.lower() for t in (args.types or [])}
+    if args.benchmarks:
+        allowed_types.update(t.lower() for t in args.benchmarks)
     allowed_threads = set(args.threads) if args.threads else None
     for row in rows:
         file_ids = tuple(UUID(str(val)) for val in row[3])
@@ -297,24 +332,30 @@ def load_queries(
     return selected
 
 
-def copy_entry_to_target(entry: FileEntry, target_dir: Path) -> Tuple[Path, Path]:
-    """
-    Copy the given file entry to the target directory.
+def copy_entry_to_target(
+    entry: FileEntry,
+    target_dir: Path,
+    cache: Dict[Path, Tuple[Path, Path]],
+) -> Tuple[Path, Path]:
+    """Copy an entry into the target directory, reusing duplicates by path."""
 
-    Returns a tuple of (actual_data_path, cleanup_root).
-    """
+    source = entry.path.resolve()
+    if source in cache:
+        return cache[source]
+
     cleanup_root = target_dir / entry.id.hex
     if cleanup_root.exists():
         shutil.rmtree(cleanup_root)
     cleanup_root.mkdir(parents=True, exist_ok=True)
 
-    source = entry.path
     if source.is_dir():
         dest_path = cleanup_root / source.name
         shutil.copytree(source, dest_path)
-        return dest_path, cleanup_root
-    dest_path = cleanup_root / source.name
-    shutil.copy2(source, dest_path)
+    else:
+        dest_path = cleanup_root / source.name
+        shutil.copy2(source, dest_path)
+
+    cache[source] = (dest_path, cleanup_root)
     return dest_path, cleanup_root
 
 
@@ -329,31 +370,70 @@ def rewrite_query(
     return updated
 
 
-def attach_duckdb_tables(
+def register_dataset_tables(
     conn: duckdb.DuckDBPyConnection,
     files: Dict[UUID, FileEntry],
     paths: Dict[UUID, Path],
-) -> List[Tuple[str, str]]:
-    created_views: List[Tuple[str, str]] = []
+) -> Tuple[List[str], List[str]]:
+    attachments: List[str] = []
+    created_views: List[str] = []
+    attached_aliases: Dict[Path, str] = {}
     for file_id, entry in files.items():
-        if entry.file_format != "duckdb":
-            continue
-        alias = f"db_{file_id.hex}"
-        conn.execute(f"ATTACH '{escape_literal(str(paths[file_id]))}' AS {alias};")
-        view_sql = (
-            f"CREATE OR REPLACE VIEW {quote_identifier(entry.table_name)} AS "
-            f"SELECT * FROM {alias}.{quote_identifier(entry.table_name)};"
-        )
-        conn.execute(view_sql)
-        created_views.append((alias, entry.table_name))
-    return created_views
+        fmt = entry.file_format.lower()
+        table_name = entry.table_name
+        path = paths[file_id].resolve()
+        table_identifier = quote_identifier(table_name)
+        if fmt == "duckdb":
+            alias = attached_aliases.get(path)
+            if alias is None:
+                alias = f"db_{file_id.hex}"
+                conn.execute(f"ATTACH '{escape_literal(str(path))}' AS {alias};")
+                attachments.append(alias)
+                attached_aliases[path] = alias
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {table_identifier} AS "
+                f"SELECT * FROM {alias}.{table_identifier};"
+            )
+            created_views.append(table_name)
+        elif fmt == "parquet":
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {table_identifier} AS "
+                f"SELECT * FROM read_parquet('{escape_literal(str(path))}');"
+            )
+            created_views.append(table_name)
+        elif fmt == "fls":
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {table_identifier} AS "
+                f"SELECT * FROM read_fls('{escape_literal(str(path))}');"
+            )
+            created_views.append(table_name)
+        elif fmt == "vortex":
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {table_identifier} AS "
+                f"SELECT * FROM read_vortex('{escape_literal(str(path))}');"
+            )
+            created_views.append(table_name)
+        elif fmt == "csv":
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {table_identifier} AS "
+                f"SELECT * FROM read_csv_auto('{escape_literal(str(path))}');"
+            )
+            created_views.append(table_name)
+        else:
+            raise RuntimeError(
+                f"Unsupported file format '{entry.file_format}' for table '{table_name}'."
+            )
+    return attachments, created_views
 
 
-def detach_duckdb_tables(
-    conn: duckdb.DuckDBPyConnection, views: List[Tuple[str, str]]
+def unregister_dataset_tables(
+    conn: duckdb.DuckDBPyConnection,
+    attachments: Sequence[str],
+    views: Sequence[str],
 ) -> None:
-    for alias, table_name in views:
+    for table_name in views:
         conn.execute(f"DROP VIEW IF EXISTS {quote_identifier(table_name)};")
+    for alias in attachments:
         conn.execute(f"DETACH {alias};")
 
 
@@ -485,6 +565,9 @@ def run_benchmarks(args: argparse.Namespace) -> None:
             )
 
         files = fetch_files(meta_conn, metadata_path)
+        entry_sizes = {
+            fid: compute_entry_size(entry.path) for fid, entry in files.items()
+        }
         grouped = group_queries(queries, require_copy=target_dir is not None)
 
         estimated_total_runs = len(queries) * max_iterations
@@ -498,7 +581,8 @@ def run_benchmarks(args: argparse.Namespace) -> None:
             file_ids = list(file_id_tuple)
             file_entries = {fid: files[fid] for fid in file_ids}
             replacements: Dict[UUID, Path] = {}
-            cleanup_paths: List[Path] = []
+            cleanup_paths: Set[Path] = set()
+            copy_cache: Dict[Path, Tuple[Path, Path]] = {}
             try:
                 if use_copy:
                     assert target_dir is not None
@@ -510,9 +594,10 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                         dest_path, cleanup_root = copy_entry_to_target(
                             file_entries[fid],
                             target_dir,
+                            copy_cache,
                         )
                         replacements[fid] = dest_path
-                        cleanup_paths.append(cleanup_root)
+                        cleanup_paths.add(cleanup_root)
                 else:
                     for fid in file_ids:
                         replacements[fid] = file_entries[fid].path
@@ -521,7 +606,9 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                 run_conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
                 try:
                     ensure_extensions(run_conn, formats)
-                    views = attach_duckdb_tables(run_conn, file_entries, replacements)
+                    attachments, views = register_dataset_tables(
+                        run_conn, file_entries, replacements
+                    )
                     try:
                         for query in group:
                             iteration = 0
@@ -541,13 +628,15 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                     summary += f"/{max_iterations}"
                                 summary += f" threads={query.thread_count}"
                                 print(f"{summary} - executing...", flush=True)
-                                success, elapsed_ms, profile_path, error_message = execute_query_run(
-                                    run_conn,
-                                    meta_conn,
-                                    query,
-                                    sql,
-                                    profile_dir,
-                                    iteration,
+                                success, elapsed_ms, profile_path, error_message = (
+                                    execute_query_run(
+                                        run_conn,
+                                        meta_conn,
+                                        query,
+                                        sql,
+                                        profile_dir,
+                                        iteration,
+                                    )
                                 )
                                 if success:
                                     success_count += 1
@@ -575,11 +664,18 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                 if dynamic_iterations:
                                     converged = False
                                     relative_error: Optional[float] = None
-                                    if len(elapsed_history) >= min_iterations and len(elapsed_history) >= 2:
+                                    if (
+                                        len(elapsed_history) >= min_iterations
+                                        and len(elapsed_history) >= 2
+                                    ):
                                         relative_error = relative_standard_error(
                                             elapsed_history
                                         )
-                                        if math.isfinite(relative_error) and relative_error <= args.mean_relative_error:
+                                        if (
+                                            math.isfinite(relative_error)
+                                            and relative_error
+                                            <= args.mean_relative_error
+                                        ):
                                             print(
                                                 f"    -> convergence reached after {iteration} iterations "
                                                 f"(relative stderr {relative_error:.4f})",
@@ -587,11 +683,16 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                             )
                                             break
                                     if iteration >= max_iterations:
-                                        if relative_error is None and len(elapsed_history) >= 2:
+                                        if (
+                                            relative_error is None
+                                            and len(elapsed_history) >= 2
+                                        ):
                                             relative_error = relative_standard_error(
                                                 elapsed_history
                                             )
-                                        if relative_error is not None and math.isfinite(relative_error):
+                                        if relative_error is not None and math.isfinite(
+                                            relative_error
+                                        ):
                                             print(
                                                 f"    -> reached max iterations ({iteration}); "
                                                 f"relative stderr {relative_error:.4f}",
@@ -608,13 +709,20 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                     if iteration >= max_iterations:
                                         break
                     finally:
-                        detach_duckdb_tables(run_conn, views)
+                        unregister_dataset_tables(run_conn, attachments, views)
                 finally:
                     run_conn.close()
             finally:
+                # subprocess.run(
+                #     ["diskutil", "eraseVolume", "EXFAT", "fls-ramdisk", target_dir],
+                #     check=True,
+                # )
                 for cleanup_root in cleanup_paths:
                     if cleanup_root.exists():
                         shutil.rmtree(cleanup_root, ignore_errors=True)
+
+                # total, used, free = shutil.disk_usage(target_dir)
+                # print(f"Free after cleanup: {free / 1e9:.2f} GB")
 
         total_elapsed = time.perf_counter() - overall_start
         print(

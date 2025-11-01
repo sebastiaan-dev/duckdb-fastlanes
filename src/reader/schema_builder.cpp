@@ -1,5 +1,7 @@
 #include "reader/schema_builder.hpp"
+#include "fls/utl/to_str.hpp"
 #include <fls/footer/table_descriptor_generated.h>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>

@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
+option(FLS_NO_TRANSPOSE "Use fastlanes::copy instead of untranspose" ON)
+
+if(FLS_NO_TRANSPOSE)
+    add_compile_definitions(FLS_NO_TRANSPOSE=1)
+endif()
+
 # Set extension name here
 set(TARGET_NAME fastlanes)
 

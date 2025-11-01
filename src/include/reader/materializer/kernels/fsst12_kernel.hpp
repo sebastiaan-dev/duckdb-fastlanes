@@ -16,7 +16,12 @@ struct KernelTraits<fastlanes::dec_fsst12_opr> {
 		const auto target_ptr  = GetDataPtr<PASS, string_t>(col);
 		auto*      in_byte_arr = reinterpret_cast<uint8_t*>(opr.fsst12_bytes_segment_view.data);
 
+#if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
+		// fastlanes::copy(opr.offset_arr, opr.untrasposed_offset);
 		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
+#else
+		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
+#endif
 
 		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
 			fastlanes::len_t encoded_size {0};

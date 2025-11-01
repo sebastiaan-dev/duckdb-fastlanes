@@ -3,7 +3,6 @@
 #include "fls/common/magic_enum.hpp"
 #include "reader/fls_multi_file_info.hpp"
 #include "reader/fls_reader.hpp"
-#include <duckdb/main/extension_util.hpp>
 
 namespace duckdb {
 
@@ -30,7 +29,7 @@ vector<PartitionStatistics> FastLanesGetPartitionStats(ClientContext& context, G
 	return result;
 }
 
-void ReadFastLanes::Register(DatabaseInstance& db) {
+void ReadFastLanes::Register(ExtensionLoader& loader) {
 	MultiFileFunction<FastLanesMultiFileInfo> fn("read_fls");
 	fn.named_parameters["explicit_cardinality"] = LogicalType::UBIGINT;
 	fn.named_parameters["file_row_number"]      = LogicalType::BOOLEAN;
@@ -43,6 +42,6 @@ void ReadFastLanes::Register(DatabaseInstance& db) {
 	fn.filter_prune         = true;
 	fn.late_materialization = false;
 
-	ExtensionUtil::RegisterFunction(db, MultiFileReader::CreateFunctionSet(static_cast<TableFunction>(fn)));
+	loader.RegisterFunction(MultiFileReader::CreateFunctionSet(static_cast<TableFunction>(fn)));
 }
 } // namespace duckdb

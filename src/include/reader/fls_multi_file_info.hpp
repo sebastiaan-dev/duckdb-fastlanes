@@ -22,7 +22,8 @@ public:
 };
 
 struct FastLanesUnionData : public BaseUnionData {
-	explicit FastLanesUnionData(OpenFileInfo file_p) : BaseUnionData(std::move(file_p)) {
+	explicit FastLanesUnionData(OpenFileInfo file_p)
+	    : BaseUnionData(std::move(file_p)) {
 	}
 
 	FastLanesFileReaderOptions options;
@@ -67,8 +68,7 @@ struct FastLanesReadGlobalState final : GlobalTableFunctionState {
  * Define all the required functions from the MultiFileFunction template class.
  */
 struct FastLanesMultiFileInfo : public MultiFileReaderInterface {
-	static unique_ptr<MultiFileReaderInterface>
-	InitializeInterface(ClientContext& context, MultiFileReader& reader, MultiFileList& file_list);
+	static unique_ptr<MultiFileReaderInterface> CreateInterface(ClientContext &context);
 
 	bool ParseCopyOption(ClientContext&         context,
 	                     const string&          key,

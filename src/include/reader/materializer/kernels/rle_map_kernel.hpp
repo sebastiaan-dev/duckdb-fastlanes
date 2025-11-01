@@ -42,7 +42,12 @@ struct KernelTraits<fastlanes::dec_rle_map_opr<fastlanes::fls_string_t, INDEX_PT
 		const auto* bytes   = reinterpret_cast<uint8_t*>(op.rle_vals_segment_view.data);
 		const auto* offsets = reinterpret_cast<fastlanes::ofs_t*>(op.rle_offset_segment_view.data);
 
+#if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
+		// fastlanes::copy(op.idxs, op.temporary_idxs);
 		generated::untranspose::fallback::scalar::untranspose_i(op.idxs, op.temporary_idxs);
+#else
+		generated::untranspose::fallback::scalar::untranspose_i(op.idxs, op.temporary_idxs);
+#endif
 
 		for (fastlanes::n_t val_idx {0}; val_idx < fastlanes::CFG::VEC_SZ; ++val_idx) {
 			const auto cur_idx     = op.temporary_idxs[val_idx];
