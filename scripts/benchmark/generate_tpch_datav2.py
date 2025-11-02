@@ -217,6 +217,10 @@ def file_extension(file_format: str) -> str:
 
 
 def copy_table(con: duckdb.DuckDBPyConnection, task: ExportTask) -> None:
+    print(
+        f"[{task.file_format}] Exporting {task.table_name} to {task.output_path} for {task.scale_factor} scale factor and {task.row_group_size} row group size"
+    )
+
     options: List[str] = []
     if task.file_format in {"parquet", "fls"}:
         options.append(f"ROW_GROUP_SIZE {task.row_group_size}")
@@ -345,7 +349,8 @@ def write_metadata(metadata_path: Path, tasks: Sequence[ExportTask]) -> None:
             )
 
         delete_params = [
-            (record[0], record[1], record[2], record[3], record[4]) for record in records
+            (record[0], record[1], record[2], record[3], record[4])
+            for record in records
         ]
         con.executemany(
             """
