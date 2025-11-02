@@ -14,7 +14,7 @@ pip install --upgrade pip >/dev/null
 pip install "duckdb==1.4.0"
 
 python scripts/benchmark/generate_tpch_datav2.py \
-  --scale-factors "$TPCH_SCALE_FACTORS" \
+  --scale-factors $(TPCH_SCALE_FACTORS) \
   --file-formats parquet fls vortex duckdb
 
 deactivate || true
