@@ -323,29 +323,45 @@ def write_metadata(metadata_path: Path, tasks: Sequence[ExportTask]) -> None:
             );
             """
         )
-        con.execute("DELETE FROM files;")
-        if tasks:
-            records: List[Tuple[str, str, int, str, str, str]] = []
-            for task in tasks:
-                try:
-                    relative_path = task.output_path.relative_to(metadata_path.parent)
-                    path_string = str(relative_path)
-                except ValueError:
-                    path_string = str(task.output_path)
-                records.append(
-                    (
-                        task.benchmark,
-                        task.scale_factor,
-                        task.row_group_size,
-                        task.table_name,
-                        task.file_format,
-                        path_string,
-                    )
+        if not tasks:
+            return
+
+        records: List[Tuple[str, str, int, str, str, str]] = []
+        for task in tasks:
+            try:
+                relative_path = task.output_path.relative_to(metadata_path.parent)
+                path_string = str(relative_path)
+            except ValueError:
+                path_string = str(task.output_path)
+            records.append(
+                (
+                    task.benchmark,
+                    task.scale_factor,
+                    task.row_group_size,
+                    task.table_name,
+                    task.file_format,
+                    path_string,
                 )
-            con.executemany(
-                "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?);",
-                records,
             )
+
+        delete_params = [
+            (record[0], record[1], record[2], record[3], record[4]) for record in records
+        ]
+        con.executemany(
+            """
+            DELETE FROM files
+            WHERE benchmark = ?
+              AND sf = ?
+              AND rowgroup_size = ?
+              AND table_name = ?
+              AND file_format = ?;
+            """,
+            delete_params,
+        )
+        con.executemany(
+            "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?);",
+            records,
+        )
 
 
 def main() -> None:

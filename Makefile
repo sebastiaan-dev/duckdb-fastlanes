@@ -87,13 +87,11 @@ bench-set: ramdisk
 		--benchmarks tpch volumetric
 	@$(MAKE) remove-ramdisk
 
+# Might need: cmake -G Ninja -S . -B build
 generate-data-v2: vortex-extension
-	python3 scripts/benchmark/generate_tpch_datav2.py --scale-factors $(TPCH_SCALE_FACTORS) --file-formats parquet fls vortex duckdb
+	@./scripts/benchmark/generate.sh
 
-build-fls-generator:
-	cmake --build build/release --target generate_fls -j 8
-
-generate-data: build-fls-generator
+generate-data:
 	python3 -m pip install duckdb==v1.4.0
 	python3 scripts/data_generator/generate_test_data.py --scale-factors $(TPCH_SCALE_FACTORS) --row-group-vectors 64
 	python3 scripts/data_generator/generate_tpch_benchmarks.py --scale-factors $(TPCH_SCALE_FACTORS)
