@@ -13,8 +13,9 @@ struct KernelTraits<fastlanes::dec_fsst12_opr> {
 
 	template <Pass PASS>
 	static void Decode(ColumnCtxHandle&, Vector& col, idx_t, fastlanes::dec_fsst12_opr& opr, fastlanes::DataType&) {
-		const auto target_ptr  = GetDataPtr<PASS, string_t>(col);
-		auto*      in_byte_arr = reinterpret_cast<uint8_t*>(opr.fsst12_bytes_segment_view.data);
+		auto&      str_buffer = StringVector::GetStringBuffer(col);
+		const auto target_ptr = GetDataPtr<PASS, string_t>(col);
+		const auto base       = reinterpret_cast<uint8_t*>(opr.fsst12_bytes_segment_view.data);
 
 #if defined(FLS_NO_TRANSPOSE) && FLS_NO_TRANSPOSE
 		// fastlanes::copy(opr.offset_arr, opr.untrasposed_offset);
@@ -23,28 +24,34 @@ struct KernelTraits<fastlanes::dec_fsst12_opr> {
 		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
 #endif
 
-		for (auto i {0}; i < fastlanes::CFG::VEC_SZ; ++i) {
-			fastlanes::len_t encoded_size {0};
-
-			if (i == 0) {
-				encoded_size = opr.untrasposed_offset[0];
-			} else {
-				fastlanes::ofs_t offset {0};
-				offset                 = opr.untrasposed_offset[i - 1];
-				const auto offset_next = opr.untrasposed_offset[i];
-				encoded_size           = offset_next - offset;
+		fastlanes::len_t sizes[fastlanes::CFG::VEC_SZ];
+		{
+			fastlanes::ofs_t prev                   = 0;
+			const fastlanes::ofs_t* __restrict offs = opr.untrasposed_offset;
+			for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
+				const fastlanes::ofs_t cur = offs[i];
+				sizes[i]                   = cur - prev;
+				prev                       = cur;
 			}
+		}
 
-			const auto length =
-			    static_cast<fastlanes::ofs_t>(fsst12_decompress(&opr.fsst12_decoder,
-			                                                    encoded_size,
-			                                                    in_byte_arr,
-			                                                    fastlanes::CFG::String::max_bytes_per_string,
-			                                                    opr.tmp_string.data()));
+		uint8_t* __restrict in_ptrs[fastlanes::CFG::VEC_SZ];
+		{
+			fastlanes::ofs_t acc = 0;
+			for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
+				in_ptrs[i] = base + acc;
+				acc += sizes[i];
+			}
+		}
 
-			in_byte_arr += encoded_size;
+		for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
+			const fastlanes::len_t enc     = sizes[i];
+			const idx_t            max_out = static_cast<idx_t>(enc) * 6;
+			const data_ptr_t       buf     = str_buffer.AllocateShrinkableBuffer(max_out);
 
-			target_ptr[i] = StringVector::AddString(col, reinterpret_cast<const char*>(opr.tmp_string.data()), length);
+			const auto decoded_len =
+			    static_cast<fastlanes::ofs_t>(fsst12_decompress(&opr.fsst12_decoder, enc, in_ptrs[i], max_out, buf));
+			target_ptr[i] = str_buffer.FinalizeShrinkableBuffer(buf, max_out, decoded_len);
 		}
 	}
 };

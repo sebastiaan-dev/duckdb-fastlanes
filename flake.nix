@@ -4,8 +4,8 @@
     systems.url = "github:nix-systems/default";
     devenv.url = "github:cachix/devenv";
     devenv.inputs.nixpkgs.follows = "nixpkgs";
-    fenix.url = "github:nix-community/fenix";
-    fenix.inputs = {
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs = {
       nixpkgs.follows = "nixpkgs";
     };
   };
@@ -42,6 +42,11 @@
             inherit inputs pkgs;
             modules = [
               {
+                android.emulator.enable = false;
+                android.ndk.enable = false;
+                cachix.enable = false;
+                languages.haskell.stack.enable = false;
+
                 # https://devenv.sh/reference/options/
                 languages = {
                   rust = {

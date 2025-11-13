@@ -30,10 +30,10 @@ public:
 	const Value* GetStatistic(idx_t rowgroup_idx, idx_t column_idx, StatKey key) const;
 
 	const ColumnStats* GetStats(const idx_t rowgroup_idx, const idx_t column_idx) const {
-		if (rowgroup_idx >= stats_.size()) {
+		if (rowgroup_idx >= m_stats.size()) {
 			return nullptr;
 		}
-		const auto& cols = stats_[rowgroup_idx];
+		const auto& cols = m_stats[rowgroup_idx];
 		if (column_idx >= cols.size()) {
 			return nullptr;
 		}
@@ -41,7 +41,7 @@ public:
 	}
 
 	idx_t RowGroupCount() const {
-		return stats_.size();
+		return m_stats.size();
 	}
 
 private:
@@ -50,7 +50,7 @@ private:
 	                                    StatKey                            statistic_key);
 
 private:
-	std::vector<std::vector<ColumnStats>> stats_;
+	std::vector<std::vector<ColumnStats>> m_stats;
 };
 
 } // namespace duckdb

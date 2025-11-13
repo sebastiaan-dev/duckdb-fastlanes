@@ -159,6 +159,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Maximum number of iterations when using --mean-relative-error (defaults to value of --iterations).",
     )
     parser.add_argument(
+        "--connection-mode",
+        choices=("group", "per-execution"),
+        default="group",
+        help=(
+            "Reuse a single DuckDB connection per dataset group (group) or create a new "
+            "connection for every query execution (per-execution)."
+        ),
+    )
+    parser.add_argument(
         "--mean-relative-error",
         type=float,
         help="Enable mean-based stopping when the relative standard error (stddev/sqrt(n))/mean "
@@ -521,6 +530,17 @@ def configure_connection(run_conn: duckdb.DuckDBPyConnection, query: QuerySpec) 
     )
 
 
+def create_run_connection(
+    formats: Iterable[str],
+    file_entries: Dict[UUID, FileEntry],
+    replacements: Dict[UUID, Path],
+) -> Tuple[duckdb.DuckDBPyConnection, List[str], List[str]]:
+    run_conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+    ensure_extensions(run_conn, formats)
+    attachments, views = register_dataset_tables(run_conn, file_entries, replacements)
+    return run_conn, attachments, views
+
+
 def run_benchmarks(args: argparse.Namespace) -> None:
     metadata_path = args.metadata.resolve()
     if not metadata_path.exists():
@@ -565,9 +585,9 @@ def run_benchmarks(args: argparse.Namespace) -> None:
             )
 
         files = fetch_files(meta_conn, metadata_path)
-        entry_sizes = {
-            fid: compute_entry_size(entry.path) for fid, entry in files.items()
-        }
+        # entry_sizes = {
+        #     fid: compute_entry_size(entry.path) for fid, entry in files.items()
+        # }
         grouped = group_queries(queries, require_copy=target_dir is not None)
 
         estimated_total_runs = len(queries) * max_iterations
@@ -603,34 +623,60 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                         replacements[fid] = file_entries[fid].path
 
                 formats = {file_entries[fid].file_format for fid in file_ids}
-                run_conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
-                try:
-                    ensure_extensions(run_conn, formats)
-                    attachments, views = register_dataset_tables(
-                        run_conn, file_entries, replacements
+                reuse_connection = args.connection_mode == "group"
+                run_conn: Optional[duckdb.DuckDBPyConnection] = None
+                persistent_attachments: List[str] = []
+                persistent_views: List[str] = []
+                if reuse_connection:
+                    run_conn, persistent_attachments, persistent_views = (
+                        create_run_connection(formats, file_entries, replacements)
                     )
-                    try:
-                        for query in group:
-                            iteration = 0
-                            elapsed_history: List[float] = []
-                            while True:
-                                iteration += 1
-                                run_index += 1
-                                sql = rewrite_query(
-                                    query.sql, file_entries, replacements
+                try:
+                    for query in group:
+                        iteration = 0
+                        elapsed_history: List[float] = []
+                        while True:
+                            iteration += 1
+                            run_index += 1
+                            sql = rewrite_query(query.sql, file_entries, replacements)
+                            if reuse_connection:
+                                active_conn = run_conn
+                                active_attachments = persistent_attachments
+                                active_views = persistent_views
+                                assert active_conn is not None
+                            else:
+                                active_conn, active_attachments, active_views = (
+                                    create_run_connection(
+                                        formats, file_entries, replacements
+                                    )
                                 )
-                                configure_connection(run_conn, query)
+                            try:
+                                configure_connection(active_conn, query)
+                                query_formats = sorted(
+                                    {
+                                        file_entries[fid].file_format
+                                        for fid in query.file_ids
+                                    }
+                                )
+                                format_label = (
+                                    ",".join(query_formats)
+                                    if query_formats
+                                    else "unknown"
+                                )
                                 summary = (
                                     f"[{run_index}/{estimated_total_runs}] Query {query.id.hex[:8]} "
                                     f"type={query.type} iter={iteration}"
                                 )
                                 if dynamic_iterations:
                                     summary += f"/{max_iterations}"
-                                summary += f" threads={query.thread_count}"
+                                summary += (
+                                    f" threads={query.thread_count}"
+                                    f" formats={format_label}"
+                                )
                                 print(f"{summary} - executing...", flush=True)
                                 success, elapsed_ms, profile_path, error_message = (
                                     execute_query_run(
-                                        run_conn,
+                                        active_conn,
                                         meta_conn,
                                         query,
                                         sql,
@@ -645,24 +691,23 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                         elapsed_history.append(elapsed_ms)
                                     if elapsed_ms is not None:
                                         print(
-                                            f"{summary} - completed in {elapsed_ms:.2f} ms "
+                                            f"completed in {elapsed_ms:.2f} ms "
                                             f"(profile: {profile_path})",
                                             flush=True,
                                         )
                                     else:
                                         print(
-                                            f"{summary} - completed (no timing recorded)",
+                                            "completed (no timing recorded)",
                                             flush=True,
                                         )
                                 else:
                                     failure_count += 1
                                     print(
-                                        f"{summary} - FAILED: {error_message}",
+                                        f"FAILED: {error_message}",
                                         file=sys.stderr,
                                         flush=True,
                                     )
                                 if dynamic_iterations:
-                                    converged = False
                                     relative_error: Optional[float] = None
                                     if (
                                         len(elapsed_history) >= min_iterations
@@ -708,21 +753,22 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                 else:
                                     if iteration >= max_iterations:
                                         break
-                    finally:
-                        unregister_dataset_tables(run_conn, attachments, views)
+                            finally:
+                                if not reuse_connection:
+                                    unregister_dataset_tables(
+                                        active_conn, active_attachments, active_views
+                                    )
+                                    active_conn.close()
                 finally:
-                    run_conn.close()
+                    if reuse_connection and run_conn is not None:
+                        unregister_dataset_tables(
+                            run_conn, persistent_attachments, persistent_views
+                        )
+                        run_conn.close()
             finally:
-                # subprocess.run(
-                #     ["diskutil", "eraseVolume", "EXFAT", "fls-ramdisk", target_dir],
-                #     check=True,
-                # )
                 for cleanup_root in cleanup_paths:
                     if cleanup_root.exists():
                         shutil.rmtree(cleanup_root, ignore_errors=True)
-
-                # total, used, free = shutil.disk_usage(target_dir)
-                # print(f"Free after cleanup: {free / 1e9:.2f} GB")
 
         total_elapsed = time.perf_counter() - overall_start
         print(

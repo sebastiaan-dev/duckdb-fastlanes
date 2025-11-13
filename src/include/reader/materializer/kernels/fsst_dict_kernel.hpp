@@ -259,9 +259,13 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	                    LogicalType&                             type,
 	                    fastlanes::dec_fsst_dict_opr<INDEX_PT>&  op,
 	                    const std::vector<FastLanesScanFilter*>* scan_filters) {
-		auto& c     = ctx.Emplace<FSSTDictColumnCtx>();
+		auto& c = ctx.Emplace<FSSTDictColumnCtx>();
+
 		c.dict_size = op.fsst_offset_segment_view.data_span.size() / sizeof(fastlanes::ofs_t);
 		c.dict_vec  = make_uniq<Vector>(type, c.dict_size);
+		c.sel_vec   = make_uniq<SelectionVector>(2048);
+
+		auto& str_buffer = StringVector::GetStringBuffer(*c.dict_vec);
 
 		const auto  child_ptr    = GetDataPtr<Pass::First, string_t>(*c.dict_vec);
 		const auto  offset_bytes = reinterpret_cast<const uint8_t*>(op.fsst_offset_segment_view.data_span.data());
@@ -272,15 +276,13 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 			const fastlanes::ofs_t end = load_unaligned<fastlanes::ofs_t>(offset_bytes + i * sizeof(fastlanes::ofs_t));
 			const fastlanes::ofs_t enc_len = end - prev_end;
 
-			const auto decoded_size =
-			    static_cast<fastlanes::ofs_t>(test_fsst_decode(&op.fsst_decoder,
-			                                                   enc_len,
-			                                                   in_byte_arr + prev_end,
-			                                                   fastlanes::CFG::String::max_bytes_per_string,
-			                                                   op.tmp_string.data()));
+			const idx_t      max_out = static_cast<idx_t>(enc_len) * 8;
+			const data_ptr_t buf     = str_buffer.AllocateShrinkableBuffer(max_out);
 
-			child_ptr[i] =
-			    StringVector::AddString(*c.dict_vec, reinterpret_cast<const char*>(op.tmp_string.data()), decoded_size);
+			const auto decoded_size = static_cast<fastlanes::ofs_t>(
+			    test_fsst_decode(&op.fsst_decoder, enc_len, in_byte_arr + prev_end, max_out, buf));
+
+			child_ptr[i] = str_buffer.FinalizeShrinkableBuffer(buf, max_out, decoded_size);
 
 			prev_end = end;
 		}
@@ -301,22 +303,28 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	template <Pass PASS>
 	static void
 	Decode(ColumnCtxHandle& ctx, Vector& col, idx_t, fastlanes::dec_fsst_dict_opr<INDEX_PT>& op, fastlanes::DataType&) {
-		auto& c     = ctx.Expect<FSSTDictColumnCtx>();
-		auto  index = op.Index();
+		const auto& c     = ctx.Expect<FSSTDictColumnCtx>();
+		auto        index = op.Index();
+		auto&       sel   = *c.sel_vec;
 
+		// TODO: To make this fast we need to know if there will be 2 passes or only one.
+		// Do we want to add a third function call to the Kernel API that does a potential finishing pass per vector?
+		// (1) no second pass:
+		//		Immediately construct the dictionary vector.
+		// (2) second pass:
+		//		Only construct the first part of the selection vector, then on the second pass construct the dictionary
+		//		vector.
 		if constexpr (PASS == Pass::First) {
-			SelectionVector sel(2048);
 			for (idx_t i = 0; i < 1024; ++i) {
 				sel.set_index(i, static_cast<sel_t>(index[i]));
 			}
-			col.SetVectorType(VectorType::DICTIONARY_VECTOR);
-			col.Reference(*c.dict_vec);
-			col.Slice(sel, 2048);
+			col.Dictionary(*c.dict_vec, c.dict_size, sel, 1024);
+			DictionaryVector::SetDictionaryId(col, to_string(CastPointerToValue(c.dict_vec->GetBuffer().get())));
 		} else {
-			auto sel_vec = DictionaryVector::SelVector(col);
 			for (idx_t i = 0; i < 1024; ++i) {
-				sel_vec.set_index(i + 1024, static_cast<sel_t>(index[i]));
+				sel.set_index(i + 1024, static_cast<sel_t>(index[i]));
 			}
+			col.Dictionary(*c.dict_vec, c.dict_size, sel, 2048);
 		}
 	}
 };

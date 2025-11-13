@@ -52,9 +52,10 @@ struct FSSTColumnCtx final : ColumnCtxBase {
 };
 
 struct FSSTDictColumnCtx final : ColumnCtxBase {
-	size_t             dict_size;
-	unique_ptr<Vector> dict_vec;
-	buffer_ptr<void>   decoder;
+	size_t                      dict_size;
+	unique_ptr<Vector>          dict_vec;
+	unique_ptr<SelectionVector> sel_vec;
+	buffer_ptr<void>            decoder;
 };
 
 struct ColumnCtxHandle {

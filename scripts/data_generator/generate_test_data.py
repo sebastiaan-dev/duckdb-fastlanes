@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import subprocess
 import sys
 from pathlib import Path
-
-import duckdb
 
 from tpch_utils import parse_scale_list
 
@@ -17,6 +16,7 @@ BASE_PATH = (
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 BUILD_DIR = PROJECT_ROOT / "build" / "release"
+DUCKDB_BINARY = BUILD_DIR / "duckdb"
 FASTLANES_EXTENSION = BUILD_DIR / "extension/fastlanes/fastlanes.duckdb_extension"
 # TODO: Load git repo and build automatically
 VORTEX_EXTENSION = (
@@ -41,6 +41,45 @@ def resolve_vortex_extension() -> Path:
         print("Make sure to build the project first with 'make'")
         sys.exit(1)
     return VORTEX_EXTENSION
+
+
+def resolve_duckdb_binary() -> Path:
+    if not DUCKDB_BINARY.exists():
+        print(f"Error: duckdb binary not found at {DUCKDB_BINARY}")
+        print("Make sure to build the project first with 'make'")
+        sys.exit(1)
+    if not DUCKDB_BINARY.is_file():
+        print(f"Error: expected duckdb binary at {DUCKDB_BINARY}, but found something else")
+        sys.exit(1)
+    return DUCKDB_BINARY
+
+
+def sql_literal(value: str | Path) -> str:
+    text = str(value)
+    return "'" + text.replace("'", "''") + "'"
+
+
+DUCKDB_CLI_FLAGS: tuple[str, ...] = ("-unsigned", "-bail")
+
+
+def run_duckdb_sql(sql: str) -> None:
+    duckdb_binary = resolve_duckdb_binary()
+    args = [str(duckdb_binary), *DUCKDB_CLI_FLAGS, ":memory:"]
+    try:
+        subprocess.run(
+            args,
+            input=sql,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        print("Error: duckdb execution failed")
+        if exc.stdout:
+            print(exc.stdout)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        sys.exit(exc.returncode)
 
 
 def ensure_directories_exist() -> None:
@@ -81,34 +120,39 @@ def export_tpch_scale(scale, row_group_size: int | None = None) -> None:
     fls_path.parent.mkdir(parents=True, exist_ok=True)
     duckdb_path.parent.mkdir(parents=True, exist_ok=True)
 
-    con = duckdb.connect(config={"allow_unsigned_extensions": "true"})
-    con.load_extension(str(resolve_fastlanes_extension()))
-    con.load_extension(str(resolve_vortex_extension()))
+    parquet_options = "FORMAT parquet"
+    if row_group_size is not None:
+        parquet_options += f", ROW_GROUP_SIZE {row_group_size}"
 
-    try:
-        con.execute(f"CALL dbgen(sf={scale.normalized});")
-        parquet_options = "FORMAT parquet"
-        if row_group_size is not None:
-            parquet_options += f", ROW_GROUP_SIZE {row_group_size}"
-        con.execute(f"EXPORT DATABASE '{parquet_path}' ({parquet_options});")
+    fls_options = "FORMAT fls"
+    if row_group_size is not None:
+        fls_options += f", ROW_GROUP_SIZE {row_group_size}"
 
-        vortex_options = "FORMAT vortex"
-        con.execute(f"EXPORT DATABASE '{vortex_path}' ({vortex_options});")
+    fastlanes_extension = sql_literal(resolve_fastlanes_extension())
+    vortex_extension = sql_literal(resolve_vortex_extension())
+    parquet_literal = sql_literal(parquet_path)
+    vortex_literal = sql_literal(vortex_path)
+    fls_literal = sql_literal(fls_path)
+    csv_literal = sql_literal(csv_path)
+    duckdb_literal = sql_literal(duckdb_path)
 
-        fls_options = "FORMAT fls"
-        if row_group_size is not None:
-            fls_options += f", ROW_GROUP_SIZE {row_group_size}"
-        con.execute(f"EXPORT DATABASE '{fls_path}' ({fls_options});")
-        con.execute(
-            "EXPORT DATABASE '{}' (FORMAT csv, delimiter '|', header false, new_line '\n');".format(
-                csv_path
-            )
-        )
-        con.execute(f"ATTACH '{duckdb_path}' AS persistent;")
-        con.execute("COPY FROM DATABASE memory TO persistent;")
-        con.execute("DETACH persistent;")
-    finally:
-        con.close()
+    sql_commands = [
+        f"LOAD {fastlanes_extension};",
+        f"LOAD {vortex_extension};",
+        f"CALL dbgen(sf={scale.normalized});",
+        f"EXPORT DATABASE {parquet_literal} ({parquet_options});",
+        f"EXPORT DATABASE {vortex_literal} (FORMAT vortex);",
+        f"EXPORT DATABASE {fls_literal} ({fls_options});",
+        (
+            f"EXPORT DATABASE {csv_literal} "
+            "(FORMAT csv, delimiter '|', header false, new_line '\n');"
+        ),
+        f"ATTACH {duckdb_literal} AS persistent;",
+        "COPY FROM DATABASE memory TO persistent;",
+        "DETACH persistent;",
+    ]
+
+    run_duckdb_sql("\n".join(sql_commands))
 
 
 def parse_args():

@@ -3,6 +3,7 @@
 #include "reader/fls_reader.hpp"
 #include <algorithm>
 #include <duckdb/execution/adaptive_filter.hpp>
+#include <duckdb/parallel/task_scheduler.hpp>
 #include <fls/expression/physical_expression.hpp>
 #include <thread>
 
@@ -187,6 +188,7 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	local_state.row_group_base   = row_group_offsets[local_state.cur_rowgroup];
 	// Reset the row group related local state.
 	local_state.cur_vector = 0;
+	local_state.n_vectors  = GetNTuples(local_state.cur_rowgroup);
 
 	// Filters are equal across a file, only construct them once, if they exist.
 	if (filters && !local_state.adaptive_filter && local_state.scan_filters.empty()) {
@@ -271,13 +273,12 @@ void FastLanesReader::Scan(ClientContext& context,
 
 	while (true) {
 		const auto  cur_vec     = local_state.cur_vector;
-		const idx_t n_tuples    = GetNTuples(local_state.cur_rowgroup);
 		const idx_t start_tuple = cur_vec * fastlanes::CFG::VEC_SZ;
-		if (start_tuple >= n_tuples) {
+		if (start_tuple >= local_state.n_vectors) {
 			return;
 		}
 
-		const idx_t tuples_left = n_tuples - start_tuple;
+		const idx_t tuples_left = local_state.n_vectors - start_tuple;
 		const idx_t count       = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 1);
 		const auto  n_vectors   = (count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
 		if (!n_vectors) {
@@ -327,6 +328,7 @@ void FastLanesReader::Scan(ClientContext& context,
 				continue;
 			}
 			auto& target_col = chunk.data[i];
+			// TODO: This can probably be removed.
 			target_col.SetVectorType(VectorType::FLAT_VECTOR);
 			FlatVector::Validity(target_col).Reset();
 			auto data = FlatVector::GetData<int64_t>(target_col);
@@ -365,9 +367,13 @@ void FastLanesReader::FinishFile(ClientContext& context, GlobalTableFunctionStat
 
 unique_ptr<NodeStatistics> FastLanesMultiFileInfo::GetCardinality(const MultiFileBindData& bind_data_p,
                                                                   idx_t                    file_count) {
-	auto& bind_data = bind_data_p.bind_data->Cast<FastLanesReadBindData>();
-	if (bind_data.options->explicit_cardinality) {
-		return make_uniq<NodeStatistics>(bind_data.options->explicit_cardinality);
+	const auto& bind_data = bind_data_p.bind_data->Cast<FastLanesReadBindData>();
+
+	if (auto explicit_cardinality = bind_data.options->explicit_cardinality) {
+		return make_uniq<NodeStatistics>(explicit_cardinality, explicit_cardinality);
+	}
+	if (auto cardinality = bind_data.initial_file_cardinality; file_count == 1 && cardinality) {
+		return make_uniq<NodeStatistics>(cardinality, cardinality);
 	}
 	// Fallback when the first file does not contain any data.
 	return make_uniq<NodeStatistics>(MaxValue(bind_data.initial_file_cardinality, static_cast<idx_t>(42)) * file_count);

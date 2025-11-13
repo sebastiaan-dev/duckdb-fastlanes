@@ -11,6 +11,7 @@
 #include "reader/row_group_statistics.hpp"
 #include "reader/table_metadata.hpp"
 #include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ struct FastLanesScanFilter;
 class AdaptiveFilter;
 class ClientContext;
 class ColumnDecoder;
+
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.
  */

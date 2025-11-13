@@ -41,8 +41,9 @@ TABLE_OPERATOR_NAMES = {
     "PARQUET_SCAN",
     "FLS_SCAN",
     "SEQ_SCAN",
+    "READ_VORTEX",
 }
-TABLE_OPERATOR_PREFIXES = ("READ_", "PARQUET_", "FLS_")
+TABLE_OPERATOR_PREFIXES = ("READ_", "PARQUET_", "FLS_", "VORTEX_")
 
 
 @dataclass
@@ -566,7 +567,9 @@ def plot_per_table_breakdowns(
     per_table_dir = output_dir / "per_table"
     per_table_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics_by_key: Dict[Tuple[str, str, str], Dict[str, AggregatedMetric]] = defaultdict(dict)
+    metrics_by_key: Dict[Tuple[str, str, str], Dict[str, AggregatedMetric]] = (
+        defaultdict(dict)
+    )
     for metric in metrics:
         key = (metric.table, metric.column, metric.operation)
         metrics_by_key[key][metric.file_format] = metric

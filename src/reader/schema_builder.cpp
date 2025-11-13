@@ -186,36 +186,46 @@ SchemaBuildResult SchemaBuilder::Build() const {
 		throw std::runtime_error(err.str());
 	}
 
-	const auto& first_column_descriptors = rowgroup_descriptors->Get(0)->m_column_descriptors();
-	const idx_t column_count             = first_column_descriptors->size();
+	const auto& first_rowgroup_descriptors = rowgroup_descriptors->Get(0)->m_column_descriptors();
+	const idx_t column_count             = first_rowgroup_descriptors->size();
 
 	result.column_names.resize(column_count);
 	result.promoted_types.resize(column_count, DataType::INVALID);
 
+	// for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
+	// 	const auto& column_descriptor = first_column_descriptors->Get(col_idx);
+	// 	const auto  type      = column_descriptor->data_type();
+	// 	const auto  name      = column_descriptor->name()->c_str();
+
+	// 	result.column_names[col_idx]   = name;
+	// 	result.promoted_types[col_idx] = type;
+	// }
+
+	
 	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_descriptors->size(); ++rowgroup_idx) {
 		const auto& column_descriptors = rowgroup_descriptors->Get(rowgroup_idx)->m_column_descriptors();
 		if (column_descriptors->size() != column_count) {
 			throw std::runtime_error("FastLanesReader: inconsistent column counts across row groups");
 		}
-
+	
 		for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
 			const auto& column_descriptor = column_descriptors->Get(col_idx);
 			const auto  current_type      = column_descriptor->data_type();
 			const auto  current_name      = column_descriptor->name()->c_str();
-
+	
 			if (rowgroup_idx == 0) {
 				result.column_names[col_idx]   = current_name;
 				result.promoted_types[col_idx] = current_type;
 				continue;
 			}
-
+	
 			if (current_name != result.column_names[col_idx]) {
 				std::ostringstream err;
 				err << "FastLanesReader: column index " << col_idx << " has name \"" << current_name
 				    << "\" but expected \"" << result.column_names[col_idx] << "\"";
 				throw std::runtime_error(err.str());
 			}
-
+	
 			auto promoted_type = PromoteType(result.promoted_types[col_idx], current_type);
 			if (!promoted_type.has_value()) {
 				std::ostringstream err;
@@ -224,7 +234,7 @@ SchemaBuildResult SchemaBuilder::Build() const {
 				    << ") across row groups";
 				throw std::runtime_error(err.str());
 			}
-
+	
 			result.promoted_types[col_idx] = *promoted_type;
 		}
 	}

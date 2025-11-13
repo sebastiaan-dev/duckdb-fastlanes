@@ -7,6 +7,7 @@ For every table it generates a set of volumetric aggregation queries based on th
 column data types and executes each query multiple times while collecting
 profiling output per run in JSON format.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +16,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import duckdb
 
@@ -24,6 +25,7 @@ FORMAT_SUFFIXES: Dict[str, Tuple[str, ...]] = {
     "csv": (".csv",),
     "parquet": (".parquet",),
     "fls": (".fls",),
+    "vortex": (".vortex",),
 }
 
 NUMERIC_BASE_TYPES = {
@@ -65,19 +67,30 @@ TABLE_OPERATOR_NAMES = {
     "PARQUET_SCAN",
     "FLS_SCAN",
     "SEQ_SCAN",
+    "READ_VORTEX",
 }
-TABLE_OPERATOR_PREFIXES = ("READ_", "PARQUET_", "FLS_")
+TABLE_OPERATOR_PREFIXES = ("READ_", "PARQUET_", "FLS_", "VORTEX_")
 
 STATUS_LINE_WIDTH = 100
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FASTLANES_EXTENSION_PATH = (
-        REPO_ROOT
-        / "build"
-        / "release"
-        / "extension"
-        / "fastlanes"
-        / "fastlanes.duckdb_extension"
+    REPO_ROOT
+    / "build"
+    / "release"
+    / "extension"
+    / "fastlanes"
+    / "fastlanes.duckdb_extension"
+)
+VORTEX_EXTENSION = (
+    REPO_ROOT
+    / "build"
+    / "duckdb-vortex"
+    / "build"
+    / "release"
+    / "extension"
+    / "vortex"
+    / "vortex.duckdb_extension"
 )
 
 
@@ -195,6 +208,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Execute an unmeasured warmup run before each benchmark",
     )
+    parser.add_argument(
+        "--new-session-per-iteration",
+        action="store_true",
+        help="Recreate the DuckDB connection before each measured iteration",
+    )
     group_object_cache = parser.add_mutually_exclusive_group()
     group_object_cache.add_argument(
         "--enable-object-cache",
@@ -256,17 +274,17 @@ def discover_datasets(
         raise BenchmarkError(f"Data root '{data_root}' does not exist")
 
     for topic_dir in sorted(p for p in data_root.iterdir() if p.is_dir()):
-        if topic_dir.name.startswith('.'):
+        if topic_dir.name.startswith("."):
             continue
         if topics and topic_dir.name not in topics:
             continue
         for format_dir in sorted(p for p in topic_dir.iterdir() if p.is_dir()):
-            if format_dir.name.startswith('.'):
+            if format_dir.name.startswith("."):
                 continue
             if formats and format_dir.name not in formats:
                 continue
             for entry in sorted(format_dir.iterdir()):
-                if entry.name.startswith('.'):
+                if entry.name.startswith("."):
                     continue
                 dataset_name = entry.stem if entry.is_file() else entry.name
                 if dataset_names and dataset_name not in dataset_names:
@@ -282,7 +300,9 @@ def discover_datasets(
     return datasets
 
 
-def maybe_load_extensions(conn: duckdb.DuckDBPyConnection, extensions: Iterable[str]) -> None:
+def maybe_load_extensions(
+    conn: duckdb.DuckDBPyConnection, extensions: Iterable[str]
+) -> None:
     for ext in extensions:
         ext = ext.strip()
         if not ext:
@@ -294,6 +314,9 @@ def maybe_load_extensions(conn: duckdb.DuckDBPyConnection, extensions: Iterable[
 
         if ext.lower() == "fastlanes" and FASTLANES_EXTENSION_PATH.exists():
             conn.load_extension(str(FASTLANES_EXTENSION_PATH))
+            continue
+        if ext.lower() == "vortex" and VORTEX_EXTENSION.exists():
+            conn.load_extension(str(VORTEX_EXTENSION))
             continue
 
         conn.execute(f"LOAD {ext}")
@@ -331,6 +354,11 @@ def ensure_format_loaded(
             requested_extensions.insert(0, str(FASTLANES_EXTENSION_PATH))
         else:
             requested_extensions.insert(0, "fastlanes")
+    if file_format == "vortex" and "vortex" not in lower_requested:
+        if VORTEX_EXTENSION.exists():
+            requested_extensions.insert(0, str(VORTEX_EXTENSION))
+        else:
+            requested_extensions.insert(0, "vortex")
     if requested_extensions:
         maybe_load_extensions(conn, requested_extensions)
 
@@ -399,15 +427,18 @@ def register_tables(
                 f"CREATE OR REPLACE VIEW {quote_identifier(table_name)} AS "
                 f"SELECT * FROM read_fls('{literal_path}'{option_clause})"
             )
+        elif file_format == "vortex":
+            conn.execute(
+                f"CREATE OR REPLACE VIEW {quote_identifier(table_name)} AS "
+                f"SELECT * FROM read_vortex('{literal_path}')"
+            )
         else:  # pragma: no cover - defensive fallback
             raise BenchmarkError(f"Unsupported format '{file_format}'")
 
         tables.append(TableRef(schema=None, name=table_name))
 
     if not tables:
-        raise BenchmarkError(
-            f"No data files with suffix {suffixes} found in '{path}'."
-        )
+        raise BenchmarkError(f"No data files with suffix {suffixes} found in '{path}'.")
 
     return tables
 
@@ -428,10 +459,10 @@ def normalize_type(type_name: str) -> str:
     base = type_name.strip().upper()
     if not base:
         return base
-    if '(' in base:
-        base = base.split('(', 1)[0]
-    if ' ' in base:
-        base = base.split(' ', 1)[0]
+    if "(" in base:
+        base = base.split("(", 1)[0]
+    if " " in base:
+        base = base.split(" ", 1)[0]
     return base
 
 
@@ -442,6 +473,7 @@ def benchmarks_for_type(base_type: str) -> List[Tuple[str, str]]:
             ("avg", "SELECT AVG({col}) FROM {table}"),
             ("min", "SELECT MIN({col}) FROM {table}"),
             ("max", "SELECT MAX({col}) FROM {table}"),
+            ("count", "SELECT COUNT({col}) FROM {table} WHERE false"),
         ]
     if base_type in BOOLEAN_BASE_TYPES:
         return [
@@ -449,21 +481,21 @@ def benchmarks_for_type(base_type: str) -> List[Tuple[str, str]]:
                 "count_true",
                 "SELECT SUM(CASE WHEN {col} THEN 1 ELSE 0 END) FROM {table}",
             ),
-            ("count", "SELECT COUNT({col}) FROM {table}"),
+            ("count", "SELECT COUNT({col}) FROM {table} WHERE false"),
         ]
     if base_type in DATE_BASE_TYPES or base_type in DATETIME_BASE_TYPES:
         return [
             ("min", "SELECT MIN({col}) FROM {table}"),
             ("max", "SELECT MAX({col}) FROM {table}"),
-            ("count", "SELECT COUNT({col}) FROM {table}"),
+            ("count", "SELECT COUNT({col}) FROM {table} WHERE false"),
         ]
     if base_type in STRING_BASE_TYPES:
         return [
-            ("count", "SELECT COUNT({col}) FROM {table}"),
+            ("count", "SELECT COUNT({col}) FROM {table} WHERE false"),
             ("count_distinct", "SELECT COUNT(DISTINCT {col}) FROM {table}"),
         ]
     if base_type in BLOB_BASE_TYPES:
-        return [("count", "SELECT COUNT({col}) FROM {table}")]
+        return [("count", "SELECT COUNT({col}) FROM {table} WHERE false")]
     return []
 
 
@@ -556,13 +588,14 @@ def maybe_warmup(conn: duckdb.DuckDBPyConnection, query: str) -> None:
 
 
 def run_benchmarks_for_table(
-    conn: duckdb.DuckDBPyConnection,
+    conn: Optional[duckdb.DuckDBPyConnection],
     table: TableRef,
     columns: List[ColumnInfo],
     args: argparse.Namespace,
     results_dir: Path,
     profile_subdir: Path,
     include_tables: Optional[Sequence[str]] = None,
+    connection_factory: Optional[Callable[[], duckdb.DuckDBPyConnection]] = None,
 ) -> List[BenchmarkResult]:
     results: List[BenchmarkResult] = []
     if include_tables:
@@ -573,6 +606,13 @@ def run_benchmarks_for_table(
         }
         if not any(alias in include_tables for alias in aliases):
             return results
+
+    if args.new_session_per_iteration and connection_factory is None:
+        raise BenchmarkError(
+            "--new-session-per-iteration requires a connection factory to be provided"
+        )
+    if not args.new_session_per_iteration and conn is None:
+        raise BenchmarkError("Connection must be provided when using a shared session")
 
     for column in columns:
         base_type = normalize_type(column.type)
@@ -587,8 +627,19 @@ def run_benchmarks_for_table(
             runs: List[Dict[str, object]] = []
 
             if args.warmup:
+                warmup_conn: Optional[duckdb.DuckDBPyConnection]
+                warmup_conn = conn
+                close_warmup_conn = False
+                if args.new_session_per_iteration:
+                    assert connection_factory is not None  # for type checkers
+                    warmup_conn = connection_factory()
+                    close_warmup_conn = True
                 try:
-                    maybe_warmup(conn, query)
+                    if warmup_conn is None:
+                        raise BenchmarkError(
+                            "Failed to acquire connection for warmup run"
+                        )
+                    maybe_warmup(warmup_conn, query)
                 except duckdb.Error as exc:
                     print(" " * STATUS_LINE_WIDTH, end="\r", flush=True)
                     raise BenchmarkError(
@@ -599,19 +650,31 @@ def run_benchmarks_for_table(
                     raise BenchmarkError(
                         f"Unexpected error during warmup for {table.display_name}.{column.name} [{op_name}]: {exc}"
                     ) from exc
+                finally:
+                    if close_warmup_conn and warmup_conn is not None:
+                        warmup_conn.close()
 
             for run_index in range(1, args.iterations + 1):
-                status_message = (
-                    f"  -> {table.display_name}.{column.name} [{op_name}] run {run_index}/{args.iterations}"
-                )
+                status_message = f"  -> {table.display_name}.{column.name} [{op_name}] run {run_index}/{args.iterations}"
                 print(status_message.ljust(STATUS_LINE_WIDTH), end="\r", flush=True)
                 profile_path = (
                     profile_subdir
                     / f"{table.display_name}__{column.name}__{op_name}__run{run_index}.json"
                 )
+                run_conn: Optional[duckdb.DuckDBPyConnection]
+                run_conn = conn
+                close_run_conn = False
+                if args.new_session_per_iteration:
+                    assert connection_factory is not None  # for type checkers
+                    run_conn = connection_factory()
+                    close_run_conn = True
                 try:
+                    if run_conn is None:
+                        raise BenchmarkError(
+                            "Failed to acquire connection for benchmark run"
+                        )
                     latency, table_time, rows, profile_file = run_query_with_profiling(
-                        conn, query, profile_path
+                        run_conn, query, profile_path
                     )
                 except duckdb.Error as exc:
                     print(" " * STATUS_LINE_WIDTH, end="\r", flush=True)
@@ -623,6 +686,9 @@ def run_benchmarks_for_table(
                     raise BenchmarkError(
                         f"Unexpected error while running {table.display_name}.{column.name} [{op_name}]: {exc}"
                     ) from exc
+                finally:
+                    if close_run_conn and run_conn is not None:
+                        run_conn.close()
                 runs.append(
                     {
                         "run": run_index,
@@ -657,6 +723,7 @@ def build_config_tag(args: argparse.Namespace) -> str:
         f"iters-{args.iterations}",
         f"pqrg-{args.parquet_row_group_size if args.parquet_row_group_size else 'default'}",
         f"flsrg-{args.fastlanes_row_group_size if args.fastlanes_row_group_size else 'default'}",
+        f"session-{'periter' if args.new_session_per_iteration else 'shared'}",
     ]
     if args.warmup:
         parts.append("warmup")
@@ -668,26 +735,50 @@ def run_dataset_benchmarks(
     args: argparse.Namespace,
     results_root: Path,
 ) -> Optional[Path]:
-    dataset_dir = results_root / dataset.topic / dataset.file_format / dataset.dataset_name
+    dataset_dir = (
+        results_root / dataset.topic / dataset.file_format / dataset.dataset_name
+    )
     dataset_dir.mkdir(parents=True, exist_ok=True)
     config_tag = build_config_tag(args)
     profile_dir = dataset_dir / args.profile_subdir / config_tag
     profile_dir.mkdir(parents=True, exist_ok=True)
 
-    conn: Optional[duckdb.DuckDBPyConnection] = None
-    try:
+    def open_connection() -> duckdb.DuckDBPyConnection:
         if dataset.file_format.lower() == "duckdb":
-            conn = duckdb.connect(str(dataset.path), read_only=True, config={"allow_unsigned_extensions": "true"})
-        else:
-            conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+            return duckdb.connect(
+                str(dataset.path),
+                read_only=True,
+                config={"allow_unsigned_extensions": "true"},
+            )
+        return duckdb.connect(config={"allow_unsigned_extensions": "true"})
 
-        ensure_format_loaded(conn, dataset.file_format.lower(), args)
-        configure_connection(conn, args)
-        tables = register_tables(conn, dataset, args)
+    def prepare_connection(connection: duckdb.DuckDBPyConnection) -> List[TableRef]:
+        ensure_format_loaded(connection, dataset.file_format.lower(), args)
+        configure_connection(connection, args)
+        return register_tables(connection, dataset, args)
 
-        all_results: List[BenchmarkResult] = []
+    conn: Optional[duckdb.DuckDBPyConnection] = None
+    connection_factory: Optional[Callable[[], duckdb.DuckDBPyConnection]] = None
+    try:
+        conn = open_connection()
+        tables = prepare_connection(conn)
+
+        table_entries: List[Tuple[TableRef, List[ColumnInfo]]] = []
         for table in tables:
             columns = fetch_columns(conn, table)
+            table_entries.append((table, columns))
+
+        if args.new_session_per_iteration:
+            conn.close()
+            conn = None
+
+            def connection_factory() -> duckdb.DuckDBPyConnection:
+                new_conn = open_connection()
+                prepare_connection(new_conn)
+                return new_conn
+
+        all_results: List[BenchmarkResult] = []
+        for table, columns in table_entries:
             table_results = run_benchmarks_for_table(
                 conn,
                 table,
@@ -696,6 +787,7 @@ def run_dataset_benchmarks(
                 dataset_dir,
                 profile_dir,
                 include_tables=args.tables,
+                connection_factory=connection_factory,
             )
             all_results.extend(table_results)
 
@@ -725,6 +817,9 @@ def run_dataset_benchmarks(
                 if args.disable_external_file_cache
                 else "default",
                 "iterations": args.iterations,
+                "session_scope": "per_iteration"
+                if args.new_session_per_iteration
+                else "shared",
                 "warmup": args.warmup,
                 "parquet_row_group_size": args.parquet_row_group_size,
                 "fastlanes_row_group_size": args.fastlanes_row_group_size,

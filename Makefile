@@ -74,17 +74,38 @@ else
 	$(error Unsupported OS: $(UNAME_S))
 endif
 
-bench-set: ramdisk
+bench-all: 
+	$(MAKE) bench-per-iteration
+	$(MAKE) bench-per-shared
+
+bench-per-iteration: ramdisk
 	python3 scripts/benchmark/run_query_benchmarks.py \
-		--mean-relative-error 0.05 \
-		--min-iterations 5 \
-		--max-iterations 60 \
-		--threads 2 \
+		--mean-relative-error 0.025 \
+		--min-iterations 10 \
+		--max-iterations 100 \
+		--threads 1 2 4 8 \
 		--ram-disk true \
 		--target-dir /Volumes/fls-ramdisk \
 		--object-cache true \
 		--external-file-cache true \
-		--benchmarks tpch volumetric
+		--benchmarks tpch volumetric \
+		--connection-mode per-execution
+	@$(MAKE) remove-ramdisk
+
+bench-per-shared: ramdisk
+	python3 scripts/benchmark/run_query_benchmarks.py \
+		--mean-relative-error 0.025 \
+		--min-iterations 10 \
+		--max-iterations 100 \
+		--threads 1 2 4 8 \
+		--ram-disk true \
+		--target-dir /Volumes/fls-ramdisk \
+		--object-cache true \
+		--external-file-cache true \
+		--benchmarks tpch volumetric \
+		--connection-mode group \
+		--metadata benchmark/datav2/metadata-persist.duckdb
+		--profile-dir benchmark/datav2/profiles-persist
 	@$(MAKE) remove-ramdisk
 
 # Might need: cmake -G Ninja -S . -B build

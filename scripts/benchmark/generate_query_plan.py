@@ -177,6 +177,10 @@ def recreate_queries_table(conn: duckdb.DuckDBPyConnection) -> None:
             type VARCHAR NOT NULL,
             sql TEXT NOT NULL,
             file_ids UUID[] NOT NULL,
+            column_name VARCHAR,
+            table_name VARCHAR,
+            operator VARCHAR,
+            tpch_query INTEGER,
             ram_disk BOOLEAN NOT NULL,
             thread_count INTEGER,
             object_cache BOOLEAN NOT NULL,
@@ -283,6 +287,19 @@ def escape_literal(value: str) -> str:
     return value.replace("'", "''")
 
 
+def aggregate_operator_name(aggregate: str) -> Optional[str]:
+    text = aggregate.strip()
+    if not text:
+        return None
+    upper = text.upper()
+    if upper.startswith("COUNT(DISTINCT"):
+        return "count_distinct"
+    idx = text.find("(")
+    if idx != -1:
+        text = text[:idx]
+    return text.strip().lower() or None
+
+
 def column_definitions_for_file(
     file_entry: FileEntry,
     formats_requiring_extensions: Sequence[str],
@@ -382,6 +399,9 @@ def generate_volumetric_queries(
                             "type": "volumetric",
                             "sql": sql,
                             "file_ids": [file_entry.id],
+                            "column_name": column["name"],
+                            "table_name": file_entry.table_name,
+                            "operator": aggregate_operator_name(aggregate),
                             "ram_disk": config.ram_disk,
                             "thread_count": config.thread_count,
                             "object_cache": config.object_cache,
@@ -421,11 +441,16 @@ def generate_tpch_queries(
                 continue
             file_ids = [table_map[table].id for table in required_tables]
             for config in configs:
+                try:
+                    query_number = int(query_name.lstrip("q"))
+                except ValueError:
+                    query_number = None
                 tpch_entries.append(
                     {
                         "type": "tpch",
                         "sql": sql,
                         "file_ids": file_ids,
+                        "tpch_query": query_number,
                         "ram_disk": config.ram_disk,
                         "thread_count": config.thread_count,
                         "object_cache": config.object_cache,
@@ -441,14 +466,30 @@ def insert_queries(
     if not query_rows:
         return
     insert_sql = """
-        INSERT INTO queries (type, sql, file_ids, ram_disk, thread_count, object_cache, external_file_cache)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO queries (
+            type,
+            sql,
+            file_ids,
+            column_name,
+            table_name,
+            operator,
+            tpch_query,
+            ram_disk,
+            thread_count,
+            object_cache,
+            external_file_cache
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     data = [
         (
             row["type"],
             row["sql"],
             [str(file_id) for file_id in row["file_ids"]],
+            row.get("column_name"),
+            row.get("table_name"),
+            row.get("operator"),
+            row.get("tpch_query"),
             row["ram_disk"],
             row["thread_count"],
             row["object_cache"],

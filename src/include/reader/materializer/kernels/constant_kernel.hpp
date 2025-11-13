@@ -14,7 +14,6 @@ struct KernelTraits<fastlanes::dec_constant_opr<PT>> {
 	                    LogicalType&,
 	                    const fastlanes::dec_constant_opr<PT>&,
 	                    const std::vector<FastLanesScanFilter*>*) {
-		// std::cout << "Prepare fastlanes::dec_constant_opr" << std::endl;
 	}
 
 	template <Pass PASS>

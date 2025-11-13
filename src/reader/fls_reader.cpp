@@ -1,6 +1,5 @@
 #include "reader/fls_reader.hpp"
 #include "duckdb/common/constants.hpp"
-#include "duckdb/common/types/vector.hpp"
 #include "fls/reader/table_reader.hpp"
 #include "reader/schema_builder.hpp"
 #include "reader/translation_utils.hpp"
@@ -8,11 +7,18 @@
 #include <atomic>
 #include <duckdb/common/multi_file/multi_file_reader.hpp>
 #include <duckdb/execution/adaptive_filter.hpp>
-#include <filesystem>
 #include <utility>
 #include <vector>
 
 namespace duckdb {
+
+// FIXME:
+// - Late initialization with projected columns for statistics
+// - Even more so, do we need to construct all columns or can we do away with all other columns?
+// - Check that multi-file stuff works correctly (are stats reset?)
+// - Can the columns_id of a reader change for a given Reader?
+
+// DUCKDB reads all column types during bind (verify), so there is no way to optimize for this.
 
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
     : BaseFileReader(std::move(file_p))
@@ -189,9 +195,9 @@ unique_ptr<BaseStatistics> FastLanesReader::GetStatistics(ClientContext& context
 	if (IsFileRowNumberColumn(file_col_idx)) {
 		unique_ptr<BaseStatistics> column_stats;
 		for (idx_t row_group_idx = 0; row_group_idx < table_metadata->RowGroupCount(); row_group_idx++) {
-			auto  chunk_stats      = NumericStats::CreateUnknown(type);
-			idx_t row_group_offset = row_group_offsets[row_group_idx];
-			idx_t row_group_count  = table_metadata->RowGroupDescriptor(row_group_idx).m_n_tuples();
+			auto        chunk_stats      = NumericStats::CreateUnknown(type);
+			const idx_t row_group_offset = row_group_offsets[row_group_idx];
+			const idx_t row_group_count  = table_metadata->RowGroupDescriptor(row_group_idx).m_n_tuples();
 			NumericStats::SetMin(chunk_stats, Value::BIGINT(static_cast<int64_t>(row_group_offset)));
 			NumericStats::SetMax(chunk_stats, Value::BIGINT(static_cast<int64_t>(row_group_offset + row_group_count)));
 			chunk_stats.Set(StatsInfo::CANNOT_HAVE_NULL_VALUES);

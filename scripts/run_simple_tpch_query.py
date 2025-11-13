@@ -18,8 +18,18 @@ DATA_ROOT = REPO_ROOT / "benchmark" / "data" / "tpch"
 DEFAULT_TABLE = "lineitem"
 DEFAULT_COLUMN = "l_extendedprice"
 FASTLANES_EXTENSION_CANDIDATES: Sequence[Path] = (
-    REPO_ROOT / "build" / "release" / "extension" / "fastlanes" / "fastlanes.duckdb_extension",
-    REPO_ROOT / "build" / "debug" / "extension" / "fastlanes" / "fastlanes.duckdb_extension",
+    REPO_ROOT
+    / "build"
+    / "release"
+    / "extension"
+    / "fastlanes"
+    / "fastlanes.duckdb_extension",
+    REPO_ROOT
+    / "build"
+    / "debug"
+    / "extension"
+    / "fastlanes"
+    / "fastlanes.duckdb_extension",
 )
 WARMUP_RUNS = 2
 
@@ -32,7 +42,7 @@ class ScaleInfo:
 
     @property
     def dataset_name(self) -> str:
-        return f"tpch_sf{self.slug}"
+        return f"tpch_sf{self.slug}_rg65536"
 
 
 def parse_scale(value: str) -> ScaleInfo:
@@ -82,15 +92,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=5,
         help="Number of times to run the query (default: 5)",
     )
+    parser.add_argument(
+        "--operator",
+        choices=("sum", "count", "max", "min", "avg", "distinct"),
+        default="count",
+        help="Aggregation operator to use (default: count)",
+    )
     return parser.parse_args(argv)
 
 
 def connect(database_path: Optional[Path] = None) -> duckdb.DuckDBPyConnection:
     if database_path is not None:
-        conn = duckdb.connect(str(database_path), config={"allow_unsigned_extensions": "true"})
+        conn = duckdb.connect(
+            str(database_path), config={"allow_unsigned_extensions": "true"}
+        )
     else:
         conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     conn.execute("PRAGMA threads=1;")
+    # conn.execute("PRAGMA enable_object_cache")
+    # conn.execute("SET enable_external_file_cache = TRUE")
     conn.execute("PRAGMA disable_object_cache")
     conn.execute("SET enable_external_file_cache = FALSE")
 
@@ -113,14 +133,20 @@ def ensure_fastlanes(conn: duckdb.DuckDBPyConnection) -> None:
 
 
 def validate_identifier(name: str, kind: str) -> str:
-    if not name or not name.replace("_", "").replace(".", "").isalnum() or name[0].isdigit():
+    if (
+        not name
+        or not name.replace("_", "").replace(".", "").isalnum()
+        or name[0].isdigit()
+    ):
         raise ValueError(f"Invalid {kind} identifier '{name}'")
     if '"' in name:
         raise ValueError(f"{kind.capitalize()} identifier cannot contain double quotes")
     return name
 
 
-def run_duckdb_query(table: str, column: str, scale: ScaleInfo, runs: int) -> None:
+def run_duckdb_query(
+    table: str, column: str, scale: ScaleInfo, runs: int, operator: str
+) -> None:
     db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name}.duckdb"
     if not db_path.exists():
         raise FileNotFoundError(f"DuckDB database not found at {db_path}")
@@ -128,26 +154,38 @@ def run_duckdb_query(table: str, column: str, scale: ScaleInfo, runs: int) -> No
     try:
         table_name = validate_identifier(table, "table")
         column_name = validate_identifier(column, "column")
-        query = f"SELECT SUM({column_name}) FROM {table_name};"
-        execute_runs(conn, query, (), runs)
+        if operator == "distinct":
+            select_sql = f"SELECT COUNT(DISTINCT {column_name}) FROM {table_name};"
+        else:
+            select_sql = f"SELECT {operator.upper()}({column_name}) FROM {table_name};"
+        execute_runs(conn, select_sql, (), runs)
     finally:
         conn.close()
 
 
-def run_parquet_query(table: str, column: str, scale: ScaleInfo, runs: int) -> None:
+def run_parquet_query(
+    table: str, column: str, scale: ScaleInfo, runs: int, operator: str
+) -> None:
     parquet_path = DATA_ROOT / "parquet" / scale.dataset_name / f"{table}.parquet"
     if not parquet_path.exists():
         raise FileNotFoundError(f"Parquet file not found at {parquet_path}")
     conn = connect()
     try:
         column_name = validate_identifier(column, "column")
-        query = f"SELECT SUM({column_name}) FROM read_parquet(?);"
-        execute_runs(conn, query, (str(parquet_path),), runs)
+        if operator == "distinct":
+            select_sql = f"SELECT COUNT(DISTINCT {column_name}) FROM read_parquet(?);"
+        else:
+            select_sql = (
+                f"SELECT {operator.upper()}({column_name}) FROM read_parquet(?);"
+            )
+        execute_runs(conn, select_sql, (str(parquet_path),), runs)
     finally:
         conn.close()
 
 
-def run_fls_query(table: str, column: str, scale: ScaleInfo, runs: int) -> None:
+def run_fls_query(
+    table: str, column: str, scale: ScaleInfo, runs: int, operator: str
+) -> None:
     fls_path = DATA_ROOT / "fls" / scale.dataset_name / f"{table}.fls"
     if not fls_path.exists():
         raise FileNotFoundError(f"FastLanes file not found at {fls_path}")
@@ -155,9 +193,11 @@ def run_fls_query(table: str, column: str, scale: ScaleInfo, runs: int) -> None:
     try:
         ensure_fastlanes(conn)
         column_name = validate_identifier(column, "column")
-        # query = f"SELECT SUM({column_name}) FROM read_fls(?);"
-        query = f"SELECT SUM({column_name}) FROM read_fls(?);"
-        execute_runs(conn, query, (str(fls_path),), runs)
+        if operator == "distinct":
+            select_sql = f"SELECT COUNT(DISTINCT {column_name}) FROM read_fls(?);"
+        else:
+            select_sql = f"SELECT {operator.upper()}({column_name}) FROM read_fls(?);"
+        execute_runs(conn, select_sql, (str(fls_path),), runs)
     finally:
         conn.close()
 
@@ -196,16 +236,17 @@ def execute_runs(
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
     runs = args.runs
+    operator = args.operator
     table = args.table
     column = args.column
     scale: ScaleInfo = args.scale
 
     if args.format == "duckdb":
-        run_duckdb_query(table, column, scale, runs)
+        run_duckdb_query(table, column, scale, runs, operator)
     elif args.format == "parquet":
-        run_parquet_query(table, column, scale, runs)
+        run_parquet_query(table, column, scale, runs, operator)
     elif args.format == "fls":
-        run_fls_query(table, column, scale, runs)
+        run_fls_query(table, column, scale, runs, operator)
     else:
         raise ValueError(f"Unsupported format '{args.format}'")
 
@@ -213,6 +254,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (duckdb.Error, RuntimeError, FileNotFoundError, ValueError, argparse.ArgumentTypeError) as err:
+    except (
+        duckdb.Error,
+        RuntimeError,
+        FileNotFoundError,
+        ValueError,
+        argparse.ArgumentTypeError,
+    ) as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
