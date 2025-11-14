@@ -691,8 +691,7 @@ def run_benchmarks(args: argparse.Namespace) -> None:
                                         elapsed_history.append(elapsed_ms)
                                     if elapsed_ms is not None:
                                         print(
-                                            f"completed in {elapsed_ms:.2f} ms "
-                                            f"(profile: {profile_path})",
+                                            f"completed in {elapsed_ms:.2f} ms ",
                                             flush=True,
                                         )
                                     else:

@@ -55,7 +55,7 @@ else ifeq ($(UNAME_S),Linux)
 	@sudo modprobe brd rd_size=$(shell echo $$(( $(RAMDISK_SIZE) * 1024 ))) max_part=1 rd_nr=1
 	@sudo mkfs.exfat /dev/ram0
 	@sudo mkdir /mnt/$(RAMDISK_LABEL)
-	@sudo mount /dev/ram0 /mnt/$(RAMDISK_LABEL)
+	@sudo mount -t exfat /dev/ram0 /mnt/$(RAMDISK_LABEL)
 	@echo "[Linux] Mounted at /mnt/$(RAMDISK_LABEL)"
 else
 	$(error Unsupported OS: $(UNAME_S))
@@ -68,20 +68,20 @@ ifeq ($(UNAME_S),Darwin)
 else ifeq ($(UNAME_S),Linux)
 	@echo "[Linux] Cleaning RAM disk"
 	@sudo umount /mnt/$(RAMDISK_LABEL) >/dev/null 2>&1 || true
-	@rmdir /mnt/$(RAMDISK_LABEL) >/dev/null 2>&1 || true
+	@sudo rmdir /mnt/$(RAMDISK_LABEL) >/dev/null 2>&1 || true
 	@sudo rmmod brd >/dev/null 2>&1 || true
 else
 	$(error Unsupported OS: $(UNAME_S))
 endif
 
-bench-all: 
+bench-all:
 	$(MAKE) bench-per-iteration
 	$(MAKE) bench-per-shared
 
 bench-per-iteration: ramdisk
 	python3 scripts/benchmark/run_query_benchmarks.py \
 		--mean-relative-error 0.025 \
-		--min-iterations 10 \
+		--min-iterations 5 \
 		--max-iterations 100 \
 		--threads 1 2 4 8 \
 		--ram-disk true \
@@ -95,7 +95,7 @@ bench-per-iteration: ramdisk
 bench-per-shared: ramdisk
 	python3 scripts/benchmark/run_query_benchmarks.py \
 		--mean-relative-error 0.025 \
-		--min-iterations 10 \
+		--min-iterations 5 \
 		--max-iterations 100 \
 		--threads 1 2 4 8 \
 		--ram-disk true \

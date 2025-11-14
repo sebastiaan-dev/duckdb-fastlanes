@@ -279,7 +279,7 @@ void FastLanesReader::Scan(ClientContext& context,
 		}
 
 		const idx_t tuples_left = local_state.n_vectors - start_tuple;
-		const idx_t count       = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 1);
+		const idx_t count       = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 2);
 		const auto  n_vectors   = (count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
 		if (!n_vectors) {
 			return;
