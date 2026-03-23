@@ -209,9 +209,8 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	}
 
 	if (filters) {
-		// Reset so there is no conflicting filter metadata between row groups.
 		for (auto& filter : local_state.scan_filters) {
-			filter.ctx.Reset();
+			filter.ResetForRowGroup();
 		}
 	}
 

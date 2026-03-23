@@ -27,8 +27,6 @@ struct KernelTraits<fastlanes::dec_slpatch_opr<PT>> {
 		default:
 			detail::NumericHelper<PASS>::template CopyVector<PT>(op.data, col);
 		}
-
-		// detail::NumericHelper<PASS>::template CopyVector<PT>(op.data, col);
 	}
 };
 

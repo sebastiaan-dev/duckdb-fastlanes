@@ -101,37 +101,4 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 	}
 };
 
-// template <typename INDEX_PT>
-// struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> {
-// 	static void Prepare(ColumnCtxHandle&,
-// 	                    LogicalType&,
-// 	                    fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>&,
-// 	                    const std::vector<FastLanesScanFilter*>*) {
-//
-//
-// 	}
-//
-// 	template <Pass PASS>
-// 	static void Decode(ColumnCtxHandle&,
-// 	                   Vector& col,
-// 	                   idx_t,
-// 	                   fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>& op,
-// 	                   fastlanes::DataType&) {
-// 		col.SetVectorType(VectorType::FLAT_VECTOR);
-// 		auto        target_ptr = GetDataPtr<PASS, string_t>(col);
-// 		const auto* offsets    = op.dict_offsets_segment.data_span.data();
-// 		const auto* idx_arr    = op.Index();
-// 		const auto* bytes      = op.Bytes();
-//
-//
-// 		for (fastlanes::n_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
-// 			const INDEX_PT k   = idx_arr[i];
-// 			const auto     cur = detail::LoadValue<fastlanes::ofs_t>(offsets + k * sizeof(fastlanes::ofs_t));
-// 			const auto     prev =
-//                 (k == 0) ? 0 : detail::LoadValue<fastlanes::ofs_t>(offsets + (k - 1) * sizeof(fastlanes::ofs_t));
-// 			target_ptr[i] = StringVector::AddString(col, reinterpret_cast<const char*>(bytes + prev), cur - prev);
-// 		}
-// 	}
-// };
-
 } // namespace duckdb::materializer
