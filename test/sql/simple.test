@@ -31,7 +31,7 @@ set threads=1;
 # copy lineitem_pq to 'lineitem.tax.fls' (FORMAT fls);
 
 statement ok
-create view lineitem as select * from read_fls('/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/datav2/fls/tpch_sf10_rg65536_lineitem.fls');
+create view lineitem as select * from read_fls('/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/fls/tpch_sf10_rg65536_lineitem.fls');
 
 # statement ok
 # attach '/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/tpch/duckdb/tpch_sf10_rg65536.duckdb' as db;

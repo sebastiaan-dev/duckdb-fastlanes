@@ -5,57 +5,20 @@ import argparse
 import statistics
 import sys
 import time
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
 import duckdb
 
+from scripts.common.duckdb_utils import ensure_extension, open_connection
+from scripts.common.paths import DATA_ROOT as BENCHMARK_DATA_ROOT
+from scripts.common.tpch_utils import ScaleInfo, parse_scale_arg
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_ROOT = REPO_ROOT / "benchmark" / "data" / "tpch"
+DATA_ROOT = BENCHMARK_DATA_ROOT / "tpch"
 DEFAULT_TABLE = "lineitem"
 DEFAULT_COLUMN = "l_extendedprice"
-FASTLANES_EXTENSION_CANDIDATES: Sequence[Path] = (
-    REPO_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension",
-    REPO_ROOT
-    / "build"
-    / "debug"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension",
-)
 WARMUP_RUNS = 2
-
-
-@dataclass(frozen=True)
-class ScaleInfo:
-    original: str
-    normalized: str
-    slug: str
-
-    @property
-    def dataset_name(self) -> str:
-        return f"tpch_sf{self.slug}_rg65536"
-
-
-def parse_scale(value: str) -> ScaleInfo:
-    raw = value.replace("_", ".")
-    try:
-        numeric = Decimal(raw)
-    except InvalidOperation as exc:
-        raise argparse.ArgumentTypeError(f"Invalid scale factor '{value}'") from exc
-    if numeric <= 0:
-        raise argparse.ArgumentTypeError("Scale factor must be positive")
-    normalized = format(numeric.normalize(), "f")
-    slug = normalized.replace(".", "_")
-    return ScaleInfo(original=value, normalized=normalized, slug=slug)
+ROW_GROUP_SIZE = 65536
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -73,7 +36,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--scale",
         default="1",
-        type=parse_scale,
+        type=lambda value: parse_scale_arg(value, allow_zero=False),
         help="TPCH scale factor (e.g. 0.01, 1, 10). Defaults to 1.",
     )
     parser.add_argument(
@@ -102,12 +65,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def connect(database_path: Optional[Path] = None) -> duckdb.DuckDBPyConnection:
-    if database_path is not None:
-        conn = duckdb.connect(
-            str(database_path), config={"allow_unsigned_extensions": "true"}
-        )
-    else:
-        conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
+    conn = open_connection(database_path)
     conn.execute("PRAGMA threads=1;")
     # conn.execute("PRAGMA enable_object_cache")
     # conn.execute("SET enable_external_file_cache = TRUE")
@@ -118,13 +76,8 @@ def connect(database_path: Optional[Path] = None) -> duckdb.DuckDBPyConnection:
 
 
 def ensure_fastlanes(conn: duckdb.DuckDBPyConnection) -> None:
-    for candidate in FASTLANES_EXTENSION_CANDIDATES:
-        if candidate.exists():
-            conn.load_extension(str(candidate))
-            return
     try:
-        conn.execute("LOAD fastlanes")
-        return
+        ensure_extension(conn, "fastlanes")
     except duckdb.Error as exc:
         raise RuntimeError(
             "Failed to load FastLanes extension. Build the project (`make`) "
@@ -147,7 +100,7 @@ def validate_identifier(name: str, kind: str) -> str:
 def run_duckdb_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str
 ) -> None:
-    db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name}.duckdb"
+    db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name(ROW_GROUP_SIZE)}.duckdb"
     if not db_path.exists():
         raise FileNotFoundError(f"DuckDB database not found at {db_path}")
     conn = connect(db_path)
@@ -166,7 +119,9 @@ def run_duckdb_query(
 def run_parquet_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str
 ) -> None:
-    parquet_path = DATA_ROOT / "parquet" / scale.dataset_name / f"{table}.parquet"
+    parquet_path = (
+        DATA_ROOT / "parquet" / scale.dataset_name(ROW_GROUP_SIZE) / f"{table}.parquet"
+    )
     if not parquet_path.exists():
         raise FileNotFoundError(f"Parquet file not found at {parquet_path}")
     conn = connect()
@@ -186,7 +141,7 @@ def run_parquet_query(
 def run_fls_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str
 ) -> None:
-    fls_path = DATA_ROOT / "fls" / scale.dataset_name / f"{table}.fls"
+    fls_path = DATA_ROOT / "fls" / scale.dataset_name(ROW_GROUP_SIZE) / f"{table}.fls"
     if not fls_path.exists():
         raise FileNotFoundError(f"FastLanes file not found at {fls_path}")
     conn = connect()

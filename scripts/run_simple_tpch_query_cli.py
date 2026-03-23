@@ -5,37 +5,25 @@ import re
 import statistics
 import subprocess
 import sys
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import List, Optional, Sequence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_ROOT = REPO_ROOT / "benchmark" / "data" / "tpch"
-BUILD_DIR = REPO_ROOT / "build" / "release"
-DUCKDB_BINARY = BUILD_DIR / "duckdb"
+from scripts.common.duckdb_utils import sql_literal
+from scripts.common.paths import (
+    BUILD_ROOT,
+    DATA_ROOT as BENCHMARK_DATA_ROOT,
+    FASTLANES_EXTENSION,
+    VORTEX_EXTENSION,
+)
+from scripts.common.tpch_utils import ScaleInfo, parse_scale_arg
+
+DATA_ROOT = BENCHMARK_DATA_ROOT / "tpch"
+DUCKDB_BINARY = BUILD_ROOT / "duckdb"
 DEFAULT_TABLE = "lineitem"
 DEFAULT_COLUMN = "l_extendedprice"
-FASTLANES_EXTENSION: Path = (
-    REPO_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension"
-)
-VORTEX_EXTENSION = (
-    REPO_ROOT
-    / "build"
-    / "duckdb-vortex"
-    / "build"
-    / "release"
-    / "extension"
-    / "vortex"
-    / "vortex.duckdb_extension"
-)
 WARMUP_RUNS = 2
+ROW_GROUP_SIZE = 65536
 DUCKDB_CLI_FLAGS: Sequence[str] = ("-unsigned", "-csv", "-noheader", "-bail")
 
 
@@ -49,11 +37,6 @@ def resolve_duckdb_binary() -> Path:
             f"Expected DuckDB binary at {DUCKDB_BINARY}, but found something else."
         )
     return DUCKDB_BINARY
-
-
-def sql_literal(value: str | Path) -> str:
-    text = str(value)
-    return "'" + text.replace("'", "''") + "'"
 
 
 def run_duckdb_script(
@@ -123,30 +106,6 @@ def base_session_statements(threads: int) -> List[str]:
     ]
 
 
-@dataclass(frozen=True)
-class ScaleInfo:
-    original: str
-    normalized: str
-    slug: str
-
-    @property
-    def dataset_name(self) -> str:
-        return f"tpch_sf{self.slug}_rg65536"
-
-
-def parse_scale(value: str) -> ScaleInfo:
-    raw = value.replace("_", ".")
-    try:
-        numeric = Decimal(raw)
-    except InvalidOperation as exc:
-        raise argparse.ArgumentTypeError(f"Invalid scale factor '{value}'") from exc
-    if numeric <= 0:
-        raise argparse.ArgumentTypeError("Scale factor must be positive")
-    normalized = format(numeric.normalize(), "f")
-    slug = normalized.replace(".", "_")
-    return ScaleInfo(original=value, normalized=normalized, slug=slug)
-
-
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -162,7 +121,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--scale",
         default="1",
-        type=parse_scale,
+        type=lambda value: parse_scale_arg(value, allow_zero=False),
         help="TPCH scale factor (e.g. 0.01, 1, 10). Defaults to 1.",
     )
     parser.add_argument(
@@ -211,7 +170,7 @@ def validate_identifier(name: str, kind: str) -> str:
 def run_duckdb_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str, threads: int
 ) -> None:
-    db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name}.duckdb"
+    db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name(ROW_GROUP_SIZE)}.duckdb"
     if not db_path.exists():
         raise FileNotFoundError(f"DuckDB database not found at {db_path}")
     table_name = validate_identifier(table, "table")
@@ -228,7 +187,9 @@ def run_duckdb_query(
 def run_parquet_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str, threads: int
 ) -> None:
-    parquet_path = DATA_ROOT / "parquet" / scale.dataset_name / f"{table}.parquet"
+    parquet_path = (
+        DATA_ROOT / "parquet" / scale.dataset_name(ROW_GROUP_SIZE) / f"{table}.parquet"
+    )
     if not parquet_path.exists():
         raise FileNotFoundError(f"Parquet file not found at {parquet_path}")
     column_name = validate_identifier(column, "column")
@@ -241,7 +202,7 @@ def run_parquet_query(
 def run_fls_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str, threads: int
 ) -> None:
-    fls_path = DATA_ROOT / "fls" / scale.dataset_name / f"{table}.fls"
+    fls_path = DATA_ROOT / "fls" / scale.dataset_name(ROW_GROUP_SIZE) / f"{table}.fls"
     if not fls_path.exists():
         raise FileNotFoundError(f"FastLanes file not found at {fls_path}")
     column_name = validate_identifier(column, "column")
@@ -258,7 +219,9 @@ def run_fls_query(
 def run_vortex_query(
     table: str, column: str, scale: ScaleInfo, runs: int, operator: str, threads: int
 ) -> None:
-    vortex_path = DATA_ROOT / "vortex" / scale.dataset_name / f"{table}.vortex"
+    vortex_path = (
+        DATA_ROOT / "vortex" / scale.dataset_name(ROW_GROUP_SIZE) / f"{table}.vortex"
+    )
     if not vortex_path.exists():
         raise FileNotFoundError(f"Vortex file not found at {vortex_path}")
     column_name = validate_identifier(column, "column")

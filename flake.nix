@@ -49,11 +49,11 @@
 
                 # https://devenv.sh/reference/options/
                 languages = {
-                  rust = {
-                    enable = true;
-                    channel = "nightly";
-                    #version = "1.89.0";
-                  };
+                  # rust = {
+                  #   enable = true;
+                  #   channel = "nightly";
+                  #   #version = "1.89.0";
+                  # };
                 };
               }
             ];

@@ -19,6 +19,8 @@ vcpkg_installed/
 
 temp/
 benchmark/data/
-benchmark/datav2/
 benchmark/queries/
 benchmark/results/
+
+venv
+.venv

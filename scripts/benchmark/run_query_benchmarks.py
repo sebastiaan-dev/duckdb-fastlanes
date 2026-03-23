@@ -13,7 +13,6 @@ The script:
 
 from __future__ import annotations
 
-import subprocess
 import argparse
 import math
 import os
@@ -28,39 +27,19 @@ from uuid import UUID
 
 import duckdb
 
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
-DEFAULT_METADATA = PROJECT_ROOT / "benchmark" / "datav2" / "metadata.duckdb"
-DEFAULT_PROFILE_DIR = PROJECT_ROOT / "benchmark" / "results" / "profiles"
-
-FASTLANES_EXTENSION = (
-    PROJECT_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension"
+from scripts.common.benchmark_utils import FileEntry, parse_file_entry
+from scripts.common.duckdb_utils import (
+    ensure_extensions,
+    escape_literal,
+    quote_identifier,
+    sql_literal,
 )
-VORTEX_EXTENSION = (
-    PROJECT_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "vortex"
-    / "vortex.duckdb_extension"
-)
+from scripts.common.format_utils import view_statement
+from scripts.common.paths import DATA_ROOT, RESULTS_ROOT
 
 
-@dataclass(frozen=True)
-class FileEntry:
-    id: UUID
-    benchmark: str
-    sf: Optional[str]
-    rowgroup_size: Optional[int]
-    table_name: str
-    file_format: str
-    path: Path
+DEFAULT_METADATA = DATA_ROOT / "metadata.duckdb"
+DEFAULT_PROFILE_DIR = RESULTS_ROOT / "profiles"
 
 
 @dataclass(frozen=True)
@@ -83,7 +62,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--metadata",
         type=Path,
         default=DEFAULT_METADATA,
-        help="Path to the metadata DuckDB database (default: benchmark/datav2/metadata.duckdb)",
+        help="Path to the metadata DuckDB database (default: benchmark/data/metadata.duckdb)",
     )
     parser.add_argument(
         "--profile-dir",
@@ -181,29 +160,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def load_extension(conn: duckdb.DuckDBPyConnection, path: Path, name: str) -> None:
-    if path.exists():
-        conn.load_extension(str(path))
-    else:
-        conn.load_extension(name)
-
-
-def ensure_extensions(conn: duckdb.DuckDBPyConnection, formats: Iterable[str]) -> None:
-    lower_formats = {fmt.lower() for fmt in formats}
-    if "fls" in lower_formats:
-        load_extension(conn, FASTLANES_EXTENSION, "fastlanes")
-    if "vortex" in lower_formats:
-        load_extension(conn, VORTEX_EXTENSION, "vortex")
-
-
-def escape_literal(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def string_literal(path: Path) -> str:
-    return f"'{escape_literal(str(path))}'"
-
-
 def ensure_results_table(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute(
         """
@@ -237,18 +193,8 @@ def fetch_files(
     base_dir = metadata_path.parent.resolve()
     result: Dict[UUID, FileEntry] = {}
     for row in rows:
-        file_path = Path(row[6])
-        if not file_path.is_absolute():
-            file_path = (base_dir / file_path).resolve()
-        result[row[0]] = FileEntry(
-            id=row[0],
-            benchmark=str(row[1]),
-            sf=str(row[2]) if row[2] is not None else None,
-            rowgroup_size=int(row[3]) if row[3] is not None else None,
-            table_name=str(row[4]),
-            file_format=str(row[5]).lower(),
-            path=file_path,
-        )
+        entry = parse_file_entry(row, base_dir)
+        result[entry.id] = entry
     return result
 
 
@@ -373,8 +319,8 @@ def rewrite_query(
 ) -> str:
     updated = sql
     for file_id, entry in originals.items():
-        original_literal = string_literal(entry.path)
-        replacement_literal = string_literal(replacements[file_id])
+        original_literal = sql_literal(entry.path)
+        replacement_literal = sql_literal(replacements[file_id])
         updated = updated.replace(original_literal, replacement_literal)
     return updated
 
@@ -391,7 +337,7 @@ def register_dataset_tables(
         fmt = entry.file_format.lower()
         table_name = entry.table_name
         path = paths[file_id].resolve()
-        table_identifier = quote_identifier(table_name)
+        alias = None
         if fmt == "duckdb":
             alias = attached_aliases.get(path)
             if alias is None:
@@ -399,39 +345,8 @@ def register_dataset_tables(
                 conn.execute(f"ATTACH '{escape_literal(str(path))}' AS {alias};")
                 attachments.append(alias)
                 attached_aliases[path] = alias
-            conn.execute(
-                f"CREATE OR REPLACE VIEW {table_identifier} AS "
-                f"SELECT * FROM {alias}.{table_identifier};"
-            )
-            created_views.append(table_name)
-        elif fmt == "parquet":
-            conn.execute(
-                f"CREATE OR REPLACE VIEW {table_identifier} AS "
-                f"SELECT * FROM read_parquet('{escape_literal(str(path))}');"
-            )
-            created_views.append(table_name)
-        elif fmt == "fls":
-            conn.execute(
-                f"CREATE OR REPLACE VIEW {table_identifier} AS "
-                f"SELECT * FROM read_fls('{escape_literal(str(path))}');"
-            )
-            created_views.append(table_name)
-        elif fmt == "vortex":
-            conn.execute(
-                f"CREATE OR REPLACE VIEW {table_identifier} AS "
-                f"SELECT * FROM read_vortex('{escape_literal(str(path))}');"
-            )
-            created_views.append(table_name)
-        elif fmt == "csv":
-            conn.execute(
-                f"CREATE OR REPLACE VIEW {table_identifier} AS "
-                f"SELECT * FROM read_csv_auto('{escape_literal(str(path))}');"
-            )
-            created_views.append(table_name)
-        else:
-            raise RuntimeError(
-                f"Unsupported file format '{entry.file_format}' for table '{table_name}'."
-            )
+        conn.execute(view_statement(table_name, fmt, path, alias))
+        created_views.append(table_name)
     return attachments, created_views
 
 
@@ -444,10 +359,6 @@ def unregister_dataset_tables(
         conn.execute(f"DROP VIEW IF EXISTS {quote_identifier(table_name)};")
     for alias in attachments:
         conn.execute(f"DETACH {alias};")
-
-
-def quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def relative_standard_error(samples: Sequence[float]) -> float:

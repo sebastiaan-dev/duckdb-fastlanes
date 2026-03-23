@@ -5,35 +5,23 @@ import re
 import statistics
 import subprocess
 import sys
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import List, Optional, Sequence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_ROOT = REPO_ROOT / "benchmark" / "data" / "tpch"
-TPCH_QUERY_DIR = REPO_ROOT / "duckdb" / "extension" / "tpch" / "dbgen" / "queries"
-BUILD_DIR = REPO_ROOT / "build" / "release"
-DUCKDB_BINARY = BUILD_DIR / "duckdb"
-FASTLANES_EXTENSION: Path = (
-    REPO_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension"
+from scripts.common.duckdb_utils import sql_literal
+from scripts.common.paths import (
+    BUILD_ROOT,
+    DATA_ROOT as BENCHMARK_DATA_ROOT,
+    FASTLANES_EXTENSION,
+    PROJECT_ROOT,
+    VORTEX_EXTENSION,
 )
-VORTEX_EXTENSION = (
-    REPO_ROOT
-    / "build"
-    / "duckdb-vortex"
-    / "build"
-    / "release"
-    / "extension"
-    / "vortex"
-    / "vortex.duckdb_extension"
-)
+from scripts.common.tpch_utils import ScaleInfo, parse_scale_arg
+
+DATA_ROOT = BENCHMARK_DATA_ROOT / "tpch"
+TPCH_QUERY_DIR = PROJECT_ROOT / "duckdb" / "extension" / "tpch" / "dbgen" / "queries"
+DUCKDB_BINARY = BUILD_ROOT / "duckdb"
 TPCH_TABLES: Sequence[str] = (
     "lineitem",
     "orders",
@@ -47,6 +35,7 @@ TPCH_TABLES: Sequence[str] = (
 WARMUP_RUNS = 2
 TPCH_QUERY_COUNT = 22
 DUCKDB_CLI_FLAGS: Sequence[str] = ("-unsigned", "-csv", "-noheader", "-bail")
+ROW_GROUP_SIZE = 65536
 
 
 def resolve_duckdb_binary() -> Path:
@@ -59,11 +48,6 @@ def resolve_duckdb_binary() -> Path:
             f"Expected DuckDB binary at {DUCKDB_BINARY}, but found something else."
         )
     return DUCKDB_BINARY
-
-
-def sql_literal(value: str | Path) -> str:
-    text = str(value)
-    return "'" + text.replace("'", "''") + "'"
 
 
 def run_duckdb_script(
@@ -133,30 +117,6 @@ def base_session_statements(threads: int) -> List[str]:
     ]
 
 
-@dataclass(frozen=True)
-class ScaleInfo:
-    original: str
-    normalized: str
-    slug: str
-
-    @property
-    def dataset_name(self) -> str:
-        return f"tpch_sf{self.slug}_rg65536"
-
-
-def parse_scale(value: str) -> ScaleInfo:
-    raw = value.replace("_", ".")
-    try:
-        numeric = Decimal(raw)
-    except InvalidOperation as exc:
-        raise argparse.ArgumentTypeError(f"Invalid scale factor '{value}'") from exc
-    if numeric <= 0:
-        raise argparse.ArgumentTypeError("Scale factor must be positive")
-    normalized = format(numeric.normalize(), "f")
-    slug = normalized.replace(".", "_")
-    return ScaleInfo(original=value, normalized=normalized, slug=slug)
-
-
 def parse_query_id(value: str) -> int:
     cleaned = value.strip()
     if not cleaned:
@@ -193,7 +153,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--scale",
         default="1",
-        type=parse_scale,
+        type=lambda value: parse_scale_arg(value, allow_zero=False),
         help="TPC-H scale factor (e.g. 0.01, 1, 10). Defaults to 1.",
     )
     parser.add_argument(
@@ -226,7 +186,12 @@ def load_tpch_query(query_id: int) -> str:
 
 def dataset_file_path(format_name: str, scale: ScaleInfo, table: str) -> Path:
     extension = {"parquet": ".parquet", "fls": ".fls", "vortex": ".vortex"}[format_name]
-    table_path = DATA_ROOT / format_name / scale.dataset_name / f"{table}{extension}"
+    table_path = (
+        DATA_ROOT
+        / format_name
+        / scale.dataset_name(ROW_GROUP_SIZE)
+        / f"{table}{extension}"
+    )
     if not table_path.exists():
         raise FileNotFoundError(f"Data file not found for table '{table}': {table_path}")
     return table_path
@@ -246,7 +211,7 @@ def format_preparation_statements(
     format_name: str, scale: ScaleInfo
 ) -> tuple[Optional[Path], Sequence[str]]:
     if format_name == "duckdb":
-        db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name}.duckdb"
+        db_path = DATA_ROOT / "duckdb" / f"{scale.dataset_name(ROW_GROUP_SIZE)}.duckdb"
         if not db_path.exists():
             raise FileNotFoundError(f"DuckDB database not found at {db_path}")
         return db_path, ()

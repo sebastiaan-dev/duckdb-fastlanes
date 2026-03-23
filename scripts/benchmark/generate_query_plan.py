@@ -15,33 +15,17 @@ import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
-from uuid import UUID
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import duckdb
 
+from scripts.common.benchmark_utils import FileEntry, parse_file_entry
+from scripts.common.duckdb_utils import ensure_extensions, escape_literal, quote_identifier
+from scripts.common.format_utils import reader_for_format, table_expression
+from scripts.common.paths import DATA_ROOT, PROJECT_ROOT
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
-DEFAULT_METADATA = PROJECT_ROOT / "benchmark" / "datav2" / "metadata.duckdb"
+DEFAULT_METADATA = DATA_ROOT / "metadata.duckdb"
 TPCH_QUERY_DIR = PROJECT_ROOT / "duckdb" / "extension" / "tpch" / "dbgen" / "queries"
-
-FASTLANES_EXTENSION = (
-    PROJECT_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "fastlanes"
-    / "fastlanes.duckdb_extension"
-)
-VORTEX_EXTENSION = (
-    PROJECT_ROOT
-    / "build"
-    / "release"
-    / "extension"
-    / "vortex"
-    / "vortex.duckdb_extension"
-)
 
 VOLUMETRIC_BENCHMARK_SOURCES = {"volumetric", "tpch"}
 
@@ -112,17 +96,6 @@ def load_tpch_sql_queries() -> Dict[str, str]:
 
 
 @dataclass(frozen=True)
-class FileEntry:
-    id: UUID
-    benchmark: str
-    sf: Optional[str]
-    rowgroup_size: Optional[int]
-    table_name: str
-    file_format: str
-    path: Path
-
-
-@dataclass(frozen=True)
 class QueryConfig:
     ram_disk: bool
     thread_count: int
@@ -138,29 +111,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--metadata",
         type=Path,
         default=DEFAULT_METADATA,
-        help="Path to the metadata DuckDB file (defaults to benchmark/datav2/metadata.duckdb)",
+        help="Path to the metadata DuckDB file (defaults to benchmark/data/metadata.duckdb)",
     )
     return parser.parse_args(argv)
-
-
-def load_extension(conn: duckdb.DuckDBPyConnection, path: Path, name: str) -> None:
-    try:
-        if path.exists():
-            conn.load_extension(str(path))
-        else:
-            conn.load_extension(name)
-    except duckdb.Error as exc:
-        raise RuntimeError(f"Failed to load DuckDB extension '{name}': {exc}") from exc
-
-
-def ensure_support_extensions(
-    conn: duckdb.DuckDBPyConnection, formats: Iterable[str]
-) -> None:
-    lower_formats = {fmt.lower() for fmt in formats}
-    if "fls" in lower_formats:
-        load_extension(conn, FASTLANES_EXTENSION, "fastlanes")
-    if "vortex" in lower_formats:
-        load_extension(conn, VORTEX_EXTENSION, "vortex")
 
 
 def recreate_files_uuid(conn: duckdb.DuckDBPyConnection) -> None:
@@ -201,20 +154,7 @@ def get_files(conn: duckdb.DuckDBPyConnection, metadata_path: Path) -> List[File
     entries: List[FileEntry] = []
     base_dir = metadata_path.parent.resolve()
     for row in rows:
-        file_path = Path(row[6])
-        if not file_path.is_absolute():
-            file_path = (base_dir / file_path).resolve()
-        entries.append(
-            FileEntry(
-                id=row[0],
-                benchmark=str(row[1]),
-                sf=str(row[2]) if row[2] is not None else None,
-                rowgroup_size=int(row[3]) if row[3] is not None else None,
-                table_name=str(row[4]),
-                file_format=str(row[5]).lower(),
-                path=file_path,
-            )
-        )
+        entries.append(parse_file_entry(row, base_dir))
     return entries
 
 
@@ -279,14 +219,6 @@ def volumetric_templates(base_type: str) -> List[str]:
     return []
 
 
-def quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-def escape_literal(value: str) -> str:
-    return value.replace("'", "''")
-
-
 def aggregate_operator_name(aggregate: str) -> Optional[str]:
     text = aggregate.strip()
     if not text:
@@ -306,7 +238,7 @@ def column_definitions_for_file(
 ) -> List[Dict[str, str]]:
     conn = duckdb.connect(config={"allow_unsigned_extensions": "true"})
     try:
-        ensure_support_extensions(conn, formats_requiring_extensions)
+        ensure_extensions(conn, formats_requiring_extensions)
 
         fmt = file_entry.file_format.lower()
         path_literal = escape_literal(str(file_entry.path))
@@ -322,16 +254,8 @@ def column_definitions_for_file(
                 conn.execute(f"DETACH {alias};")
             return [{"name": row[1], "type": row[2]} for row in rows]
 
-        if fmt == "parquet":
-            select_sql = f"SELECT * FROM read_parquet('{path_literal}')"
-        elif fmt == "fls":
-            select_sql = f"SELECT * FROM read_fls('{path_literal}')"
-        elif fmt == "vortex":
-            select_sql = f"SELECT * FROM read_vortex('{path_literal}')"
-        elif fmt == "csv":
-            select_sql = f"SELECT * FROM read_csv_auto('{path_literal}')"
-        else:
-            raise RuntimeError(f"Unsupported file format '{file_entry.file_format}'.")
+        reader = reader_for_format(fmt)
+        select_sql = f"SELECT * FROM {reader}('{path_literal}')"
 
         try:
             rows = conn.execute(f"DESCRIBE {select_sql}").fetchall()
@@ -356,22 +280,6 @@ def column_definitions_for_file(
                 conn.execute(f"DROP VIEW IF EXISTS {quote_identifier(view_name)};")
     finally:
         conn.close()
-
-
-def table_expression(file_entry: FileEntry) -> str:
-    literal = escape_literal(str(file_entry.path))
-    fmt = file_entry.file_format.lower()
-    if fmt == "duckdb":
-        return quote_identifier(file_entry.table_name)
-    if fmt == "parquet":
-        return f"read_parquet('{literal}')"
-    if fmt == "fls":
-        return f"read_fls('{literal}')"
-    if fmt == "vortex":
-        return f"read_vortex('{literal}')"
-    if fmt == "csv":
-        return f"read_csv_auto('{literal}')"
-    raise RuntimeError(f"Unsupported file format '{file_entry.file_format}'.")
 
 
 def generate_volumetric_queries(
