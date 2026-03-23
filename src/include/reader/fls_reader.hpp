@@ -13,6 +13,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace duckdb {
@@ -38,8 +39,8 @@ public:
 	                                             GlobalTableFunctionState& gstate,
 	                                             LocalTableFunctionState&  lstate) override;
 	void                       Scan(ClientContext&            context,
-	                                GlobalTableFunctionState& global_state,
-	                                LocalTableFunctionState&  local_state,
+	                                GlobalTableFunctionState& global_state_p,
+	                                LocalTableFunctionState&  local_state_p,
 	                                DataChunk&                chunk) override;
 	void                       PrepareReader(ClientContext& context, GlobalTableFunctionState&) override;
 	void                       FinishFile(ClientContext& context, GlobalTableFunctionState& global_state_p) override;
@@ -56,12 +57,21 @@ public:
 	idx_t                                    GetNVectors(idx_t row_group_idx) const;
 	size_t                                   GetTotalTuples() const;
 	size_t                                   GetTotalVectors() const;
-	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t rowgroup_idx);
+	fastlanes::up<fastlanes::RowgroupReader> CreateRowGroupReader(idx_t                        rowgroup_idx,
+	                                                              const std::vector<uint32_t>& projected_ids);
 
 private:
-	void                      Initialize();
+	void Initialize();
+	struct ProjectionExpansion {
+		std::vector<uint32_t>               expanded_ids;
+		std::unordered_map<uint32_t, idx_t> index_map;
+	};
+	static bool         IsExternalDictOperatorToken(fastlanes::OperatorToken token);
+	static bool         HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
+	                                   const std::vector<uint32_t>&         column_ids);
+	static optional_idx GetMccDependency(const fastlanes::ColumnDescriptor& column_descriptor, idx_t column_count);
+	ProjectionExpansion ExpandProjectedColumns(idx_t rowgroup_idx);
 	const std::vector<idx_t>& GetRowGroupsToScan();
-	void ApplyFilters(DataChunk& chunk, AdaptiveFilter& adaptive_filter, std::vector<FastLanesScanFilter>& filters);
 	void EnsureFileRowNumberColumn();
 	bool IsFileRowNumberColumn(column_t column_id) const;
 

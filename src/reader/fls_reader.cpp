@@ -1,16 +1,158 @@
 #include "reader/fls_reader.hpp"
 #include "duckdb/common/constants.hpp"
+#include "duckdb/common/exception.hpp"
+#include "fls/footer/operator_token_generated.h"
 #include "fls/reader/table_reader.hpp"
 #include "reader/schema_builder.hpp"
 #include "reader/translation_utils.hpp"
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <duckdb/common/multi_file/multi_file_reader.hpp>
 #include <duckdb/execution/adaptive_filter.hpp>
+#include <iostream>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace duckdb {
+
+bool FastLanesReader::IsExternalDictOperatorToken(fastlanes::OperatorToken token) {
+	switch (token) {
+	case fastlanes::OperatorToken::EXP_DICT_I64_U32:
+	case fastlanes::OperatorToken::EXP_DICT_I64_U16:
+	case fastlanes::OperatorToken::EXP_DICT_I64_U08:
+	case fastlanes::OperatorToken::EXP_DICT_I32_U32:
+	case fastlanes::OperatorToken::EXP_DICT_I32_U16:
+	case fastlanes::OperatorToken::EXP_DICT_I32_U08:
+	case fastlanes::OperatorToken::EXP_DICT_I16_U16:
+	case fastlanes::OperatorToken::EXP_DICT_I16_U08:
+	case fastlanes::OperatorToken::EXP_DICT_I08_U08:
+	case fastlanes::OperatorToken::EXP_DICT_U08_U08:
+	case fastlanes::OperatorToken::EXP_DICT_DBL_U32:
+	case fastlanes::OperatorToken::EXP_DICT_DBL_U16:
+	case fastlanes::OperatorToken::EXP_DICT_DBL_U08:
+	case fastlanes::OperatorToken::EXP_DICT_FLT_U08:
+	case fastlanes::OperatorToken::EXP_DICT_STR_U32:
+	case fastlanes::OperatorToken::EXP_DICT_STR_U16:
+	case fastlanes::OperatorToken::EXP_DICT_STR_U08:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool FastLanesReader::HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
+                                     const std::vector<uint32_t>&         column_ids) {
+	const auto column_count = static_cast<idx_t>(rowgroup_descriptor.m_column_descriptors()->size());
+	for (const auto col_id : column_ids) {
+		if (col_id >= column_count) {
+			throw InternalException("Projected column index out of range");
+		}
+		const auto* column_descriptor = rowgroup_descriptor.m_column_descriptors()->Get(col_id);
+		const auto* rpn               = column_descriptor->encoding_rpn();
+		if (!rpn) {
+			continue;
+		}
+		const auto* operator_tokens = rpn->operator_tokens();
+		if (!operator_tokens || operator_tokens->empty()) {
+			continue;
+		}
+		const auto* operand_tokens = rpn->operand_tokens();
+		for (auto i = 0U; i < operator_tokens->size(); ++i) {
+			switch (operator_tokens->Get(i)) {
+			case fastlanes::OperatorToken::EXP_EQUAL:
+				if (!operand_tokens || operand_tokens->empty()) {
+					throw InternalException("EXP_EQUAL without operand token");
+				}
+				return true;
+			default:
+				if (IsExternalDictOperatorToken(operator_tokens->Get(i))) {
+					if (!operand_tokens || operand_tokens->empty()) {
+						throw InternalException("External dictionary encoding without operand token");
+					}
+					const auto dep = operand_tokens->Get(0);
+					if (dep < column_count) {
+						return true;
+					}
+				}
+				break;
+			}
+		}
+	}
+	return false;
+}
+
+optional_idx FastLanesReader::GetMccDependency(const fastlanes::ColumnDescriptor& column_descriptor,
+                                               idx_t                              column_count) {
+	const auto* rpn = column_descriptor.encoding_rpn();
+	if (!rpn) {
+		return optional_idx();
+	}
+	const auto* operator_tokens = rpn->operator_tokens();
+	if (!operator_tokens || operator_tokens->empty()) {
+		return optional_idx();
+	}
+	const auto* operand_tokens = rpn->operand_tokens();
+
+	bool has_equal         = false;
+	bool has_external_dict = false;
+	bool has_choose_dict   = false;
+
+	for (auto i = 0U; i < operator_tokens->size(); ++i) {
+		switch (operator_tokens->Get(i)) {
+		case fastlanes::OperatorToken::EXP_EQUAL:
+			has_equal = true;
+			break;
+		case fastlanes::OperatorToken::WIZARD_CHOOSE_DICT:
+			has_choose_dict = true;
+			break;
+		default:
+			if (IsExternalDictOperatorToken(operator_tokens->Get(i))) {
+				has_external_dict = true;
+			}
+			break;
+		}
+	}
+
+	if (has_equal && (has_external_dict || has_choose_dict)) {
+		throw InternalException("Unsupported MCC encoding with multiple dependencies");
+	}
+
+	if (has_equal) {
+		if (!operand_tokens || operand_tokens->empty()) {
+			throw InternalException("EXP_EQUAL without operand token");
+		}
+		const auto dep = operand_tokens->Get(0);
+		if (dep >= column_count) {
+			throw InternalException("EXP_EQUAL dependency index out of range");
+		}
+		return optional_idx(static_cast<idx_t>(dep));
+	}
+
+	if (has_external_dict) {
+		if (!operand_tokens || operand_tokens->empty()) {
+			throw InternalException("External dictionary encoding without operand token");
+		}
+		const auto dep = operand_tokens->Get(0);
+		if (dep >= column_count) {
+			throw InternalException("External dictionary dependency index out of range");
+		}
+		return optional_idx(static_cast<idx_t>(dep));
+	}
+
+	if (has_choose_dict) {
+		if (operand_tokens && operand_tokens->size() >= 2) {
+			const auto dep = operand_tokens->Get(0);
+			if (dep >= column_count) {
+				throw InternalException("External dictionary dependency index out of range");
+			}
+			return optional_idx(static_cast<idx_t>(dep));
+		}
+	}
+
+	return optional_idx();
+}
 
 // FIXME:
 // - Late initialization with projected columns for statistics
@@ -252,18 +394,74 @@ size_t FastLanesReader::GetTotalVectors() const {
 	return total_vectors;
 }
 
-fastlanes::up<fastlanes::RowgroupReader> FastLanesReader::CreateRowGroupReader(const idx_t rowgroup_idx) {
-	std::vector<uint32_t> projected_ids;
-	projected_ids.reserve(column_ids.size());
-
+FastLanesReader::ProjectionExpansion FastLanesReader::ExpandProjectedColumns(idx_t rowgroup_idx) {
+	const auto&           descriptor          = table_metadata->Descriptor();
+	const auto*           rowgroup_descriptor = descriptor.m_rowgroup_descriptors()->Get(rowgroup_idx);
+	const auto            column_count        = static_cast<idx_t>(rowgroup_descriptor->m_column_descriptors()->size());
+	std::vector<uint32_t> base_ids;
+	base_ids.reserve(column_ids.size());
 	for (idx_t i = 0; i < column_ids.size(); i++) {
 		const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
 		if (IsFileRowNumberColumn(col_idx)) {
 			continue;
 		}
-		projected_ids.emplace_back(col_idx);
+		if (col_idx >= column_count) {
+			throw InternalException("Projected column index out of range");
+		}
+		base_ids.emplace_back(static_cast<uint32_t>(col_idx));
 	}
 
+	if (HasMccEncoding(*rowgroup_descriptor, base_ids)) {
+		ProjectionExpansion expansion;
+		expansion.expanded_ids.reserve(column_count);
+		for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
+			expansion.expanded_ids.emplace_back(static_cast<uint32_t>(col_idx));
+		}
+		expansion.index_map.reserve(expansion.expanded_ids.size());
+		for (idx_t idx = 0; idx < expansion.expanded_ids.size(); ++idx) {
+			expansion.index_map.emplace(expansion.expanded_ids[idx], idx);
+		}
+		return expansion;
+	}
+
+	std::vector<bool>    seen(column_count, false);
+	std::deque<uint32_t> queue;
+
+	for (auto col_id : base_ids) {
+		if (!seen[col_id]) {
+			seen[col_id] = true;
+			queue.push_back(col_id);
+		}
+	}
+
+	std::vector<uint32_t> expanded_ids = base_ids;
+	while (!queue.empty()) {
+		const auto col_id = queue.front();
+		queue.pop_front();
+		const auto* column_descriptor = rowgroup_descriptor->m_column_descriptors()->Get(col_id);
+		const auto  dependency        = GetMccDependency(*column_descriptor, column_count);
+		if (!dependency.IsValid()) {
+			continue;
+		}
+		const auto dep = static_cast<uint32_t>(dependency.GetIndex());
+		if (!seen[dep]) {
+			seen[dep] = true;
+			expanded_ids.emplace_back(dep);
+			queue.push_back(dep);
+		}
+	}
+
+	ProjectionExpansion expansion;
+	expansion.expanded_ids = std::move(expanded_ids);
+	expansion.index_map.reserve(expansion.expanded_ids.size());
+	for (idx_t idx = 0; idx < expansion.expanded_ids.size(); ++idx) {
+		expansion.index_map.emplace(expansion.expanded_ids[idx], idx);
+	}
+	return expansion;
+}
+
+fastlanes::up<fastlanes::RowgroupReader>
+FastLanesReader::CreateRowGroupReader(const idx_t rowgroup_idx, const std::vector<uint32_t>& projected_ids) {
 	return table_metadata->TableReader().get_rowgroup_reader(rowgroup_idx, projected_ids);
 }
 

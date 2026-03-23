@@ -6,6 +6,7 @@
 #include "fls/reader/rowgroup_reader.hpp"
 #include "materializer/column_decoder.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
+#include <unordered_map>
 #include <utility>
 
 namespace duckdb {
@@ -58,11 +59,19 @@ struct FastLanesReadLocalState final : LocalTableFunctionState {
 	std::vector<std::vector<FastLanesScanFilter*>> filters_by_col;
 	//! Mapping from projected columns to indices inside the physical row group reader results.
 	std::vector<optional_idx> physical_projection_map;
+	//! Expanded projection column ids (projected + MCC dependencies).
+	std::vector<uint32_t> expanded_column_ids;
+	//! Mapping from column id to expanded projection index.
+	std::unordered_map<uint32_t, idx_t> expanded_column_index;
 };
 
 struct FastLanesReadGlobalState final : GlobalTableFunctionState {
 	//! Index into rowgroups_to_scan, indicating the row group within the current file that is staged for scanning.
 	idx_t next_rowgroup;
+
+	FastLanesReadGlobalState()
+	    : next_rowgroup(0) {
+	}
 };
 
 /**

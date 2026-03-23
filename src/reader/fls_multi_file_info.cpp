@@ -1,11 +1,11 @@
 #include "reader/fls_multi_file_info.hpp"
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/planner/table_filter_state.hpp"
 #include "reader/fls_reader.hpp"
 #include <algorithm>
 #include <duckdb/execution/adaptive_filter.hpp>
-#include <duckdb/parallel/task_scheduler.hpp>
 #include <fls/expression/physical_expression.hpp>
-#include <thread>
 
 namespace duckdb {
 
@@ -184,7 +184,10 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 
 	// Prepare the local state of the current worker by assigning it a row group.
 	local_state.cur_rowgroup     = rowgroups_to_scan[global_state.next_rowgroup];
-	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup);
+	auto expansion               = ExpandProjectedColumns(local_state.cur_rowgroup);
+	local_state.expanded_column_ids  = expansion.expanded_ids;
+	local_state.expanded_column_index = std::move(expansion.index_map);
+	local_state.row_group_reader = CreateRowGroupReader(local_state.cur_rowgroup, local_state.expanded_column_ids);
 	local_state.row_group_base   = row_group_offsets[local_state.cur_rowgroup];
 	// Reset the row group related local state.
 	local_state.cur_vector = 0;
@@ -214,16 +217,18 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 
 	local_state.physical_projection_map.clear();
 	local_state.physical_projection_map.resize(column_ids.size());
-	idx_t physical_projection_count = 0;
+	idx_t physical_projection_count = local_state.expanded_column_ids.size();
 	for (idx_t i {0}; i < column_ids.size(); ++i) {
 		const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
 		if (IsFileRowNumberColumn(local_column_id)) {
 			continue;
 		}
-		local_state.physical_projection_map[i] = optional_idx(physical_projection_count);
-		physical_projection_count++;
+	auto it = local_state.expanded_column_index.find(static_cast<uint32_t>(local_column_id));
+		if (it == local_state.expanded_column_index.end()) {
+			throw InternalException("Missing projected column in expanded projection");
+		}
+		local_state.physical_projection_map[i] = optional_idx(it->second);
 	}
-
 	if (local_state.column_decoders.size() != column_ids.size()) {
 		local_state.column_decoders.clear();
 		local_state.column_decoders.resize(column_ids.size());
@@ -265,9 +270,9 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	return true;
 }
 
-void FastLanesReader::Scan(ClientContext& context,
-                           GlobalTableFunctionState&,
-                           LocalTableFunctionState& local_state_p,
+void FastLanesReader::Scan(ClientContext&            context,
+                           GlobalTableFunctionState& global_state_p,
+                           LocalTableFunctionState&  local_state_p,
                            DataChunk&               chunk) {
 	auto& local_state = local_state_p.Cast<FastLanesReadLocalState>();
 
