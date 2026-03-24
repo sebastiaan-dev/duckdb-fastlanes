@@ -161,14 +161,6 @@ bool FastLanesReader::HasPhysicalProjection(const FastLanesReadLocalState& local
 	                   [](const optional_idx& entry) { return entry.IsValid(); });
 }
 
-// FIXME:
-// - Late initialization with projected columns for statistics
-// - Even more so, do we need to construct all columns or can we do away with all other columns?
-// - Check that multi-file stuff works correctly (are stats reset?)
-// - Can the columns_id of a reader change for a given Reader?
-
-// DUCKDB reads all column types during bind (verify), so there is no way to optimize for this.
-
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
     : BaseFileReader(std::move(file_p))
     , vectors_read(0) {
