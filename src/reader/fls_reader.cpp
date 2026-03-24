@@ -432,7 +432,7 @@ bool FastLanesReader::TryAssignNextRowGroup(FastLanesReadGlobalState& global_sta
 	local_state.row_group_reader      = CreateRowGroupReader(local_state.cur_rowgroup, local_state.expanded_column_ids);
 	local_state.row_group_base        = row_group_offsets[local_state.cur_rowgroup];
 	local_state.cur_vector            = 0;
-	local_state.n_vectors             = GetNTuples(local_state.cur_rowgroup);
+	local_state.n_tuples = GetNTuples(local_state.cur_rowgroup);
 
 	return true;
 }
@@ -548,14 +548,14 @@ void FastLanesReader::Scan(ClientContext&            context,
 	while (true) {
 		const auto  cur_vec     = local_state.cur_vector;
 		const idx_t start_tuple = cur_vec * fastlanes::CFG::VEC_SZ;
-		if (start_tuple >= local_state.n_vectors) {
+		if (start_tuple >= local_state.n_tuples) {
 			return;
 		}
 
-		const idx_t tuples_left = local_state.n_vectors - start_tuple;
-		const idx_t count       = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 2);
-		const auto  n_vectors   = (count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
-		if (!n_vectors) {
+		const idx_t tuples_left        = local_state.n_tuples - start_tuple;
+		const idx_t count              = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 2);
+		const auto  input_vector_count = (count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
+		if (!input_vector_count) {
 			return;
 		}
 
@@ -564,7 +564,7 @@ void FastLanesReader::Scan(ClientContext&            context,
 		                                              [](const optional_idx& entry) { return entry.IsValid(); });
 
 		// Try to fill up to the standard vector size.
-		for (idx_t batch_idx = 0; batch_idx < n_vectors; batch_idx++) {
+		for (idx_t batch_idx = 0; batch_idx < input_vector_count; batch_idx++) {
 			const idx_t vector_idx = cur_vec + batch_idx;
 			if (has_physical_columns) {
 				const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup);
@@ -615,8 +615,8 @@ void FastLanesReader::Scan(ClientContext&            context,
 
 		FilterExecutor::Apply(chunk, local_state.adaptive_filter, local_state.scan_filters, filters.get());
 
-		local_state.cur_vector += n_vectors;
-		vectors_read += n_vectors;
+		local_state.cur_vector += input_vector_count;
+		vectors_read += input_vector_count;
 
 		if (chunk.size() == 0) {
 			chunk.Reset();
