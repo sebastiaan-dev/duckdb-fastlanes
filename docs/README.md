@@ -64,14 +64,6 @@ Now we can use the features from the extension directly in DuckDB. The template 
 D create view some_table read_fls("path/to/file.fls");
 ```
 
-### Public BI data
-The script `scripts/data_generator/generate_public_bi.py` downloads the [Public BI benchmark](https://event.cwi.nl/da/PublicBIbenchmark/) datasets, expands the compressed CSV files, and materialises the `public-bi` topic under `benchmark/data/` (CSV, DuckDB, Parquet, and FastLanes outputs). For example:
-```sh
-python scripts/data_generator/generate_public_bi.py --datasets AirlineSentiment --overwrite
-```
-Run without `--overwrite` to reuse existing CSV downloads; add `--force-download` to refresh them. Omit `--datasets` to ingest every dataset advertised by the Public BI index. The script expects network access and a local FastLanes build (`build/release/extension/fastlanes/fastlanes.duckdb_extension`) to produce `.fls` files.
-
-
 ### Running the tests
 Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
 ```sh
