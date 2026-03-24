@@ -70,6 +70,10 @@ private:
 	static bool         HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
 	                                   const std::vector<uint32_t>&         column_ids);
 	static optional_idx GetMccDependency(const fastlanes::ColumnDescriptor& column_descriptor, idx_t column_count);
+	bool                TryAssignNextRowGroup(FastLanesReadGlobalState& global_state, FastLanesReadLocalState& local_state);
+	void                InitializeScanFilters(ClientContext& ctx, FastLanesReadLocalState& local_state);
+	void                InitializePhysicalProjection(FastLanesReadLocalState& local_state);
+	void                InitializeColumnDecoders(FastLanesReadLocalState& local_state);
 	ProjectionExpansion ExpandProjectedColumns(idx_t rowgroup_idx);
 	const std::vector<idx_t>& GetRowGroupsToScan();
 	void EnsureFileRowNumberColumn();
