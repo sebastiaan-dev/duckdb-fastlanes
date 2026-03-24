@@ -8,11 +8,8 @@
 #include "reader/translation_utils.hpp"
 #include <algorithm>
 #include <atomic>
-#include <deque>
 #include <duckdb/common/multi_file/multi_file_reader.hpp>
 #include <duckdb/execution/adaptive_filter.hpp>
-#include <iostream>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -82,83 +79,6 @@ bool FastLanesReader::HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgro
 		}
 	}
 	return false;
-}
-
-optional_idx FastLanesReader::GetMccDependency(const fastlanes::ColumnDescriptor& column_descriptor,
-                                               idx_t                              column_count) {
-	const auto* rpn = column_descriptor.encoding_rpn();
-	if (!rpn) {
-		return optional_idx();
-	}
-	const auto* operator_tokens = rpn->operator_tokens();
-	if (!operator_tokens || operator_tokens->empty()) {
-		return optional_idx();
-	}
-	const auto* operand_tokens = rpn->operand_tokens();
-
-	bool has_equal         = false;
-	bool has_external_dict = false;
-	bool has_choose_dict   = false;
-
-	for (auto i = 0U; i < operator_tokens->size(); ++i) {
-		switch (operator_tokens->Get(i)) {
-		case fastlanes::OperatorToken::EXP_EQUAL:
-			has_equal = true;
-			break;
-		case fastlanes::OperatorToken::WIZARD_CHOOSE_DICT:
-			has_choose_dict = true;
-			break;
-		default:
-			if (IsExternalDictOperatorToken(operator_tokens->Get(i))) {
-				has_external_dict = true;
-			}
-			break;
-		}
-	}
-
-	if (has_equal && (has_external_dict || has_choose_dict)) {
-		throw InternalException("Unsupported MCC encoding with multiple dependencies");
-	}
-
-	if (has_equal) {
-		if (!operand_tokens || operand_tokens->empty()) {
-			throw InternalException("EXP_EQUAL without operand token");
-		}
-		const auto dep = operand_tokens->Get(0);
-		if (dep >= column_count) {
-			throw InternalException("EXP_EQUAL dependency index out of range");
-		}
-		return optional_idx(static_cast<idx_t>(dep));
-	}
-
-	if (has_external_dict) {
-		if (!operand_tokens || operand_tokens->empty()) {
-			throw InternalException("External dictionary encoding without operand token");
-		}
-		const auto dep = operand_tokens->Get(0);
-		if (dep >= column_count) {
-			throw InternalException("External dictionary dependency index out of range");
-		}
-		return optional_idx(static_cast<idx_t>(dep));
-	}
-
-	if (has_choose_dict) {
-		if (operand_tokens && operand_tokens->size() >= 2) {
-			const auto dep = operand_tokens->Get(0);
-			if (dep >= column_count) {
-				throw InternalException("External dictionary dependency index out of range");
-			}
-			return optional_idx(static_cast<idx_t>(dep));
-		}
-	}
-
-	return optional_idx();
-}
-
-bool FastLanesReader::HasPhysicalProjection(const FastLanesReadLocalState& local_state) {
-	return std::any_of(local_state.physical_projection_map.begin(),
-	                   local_state.physical_projection_map.end(),
-	                   [](const optional_idx& entry) { return entry.IsValid(); });
 }
 
 FastLanesReader::FastLanesReader(OpenFileInfo file_p)
@@ -423,14 +343,13 @@ bool FastLanesReader::TryAssignNextRowGroup(FastLanesReadGlobalState& global_sta
 		return false;
 	}
 
-	local_state.cur_rowgroup          = rowgroups_to_scan[global_state.next_rowgroup];
-	auto [expanded_ids, index_map]    = ExpandProjectedColumns(local_state.cur_rowgroup);
-	local_state.expanded_column_ids   = expanded_ids;
-	local_state.expanded_column_index = std::move(index_map);
-	local_state.row_group_reader      = CreateRowGroupReader(local_state.cur_rowgroup, local_state.expanded_column_ids);
-	local_state.row_group_base        = row_group_offsets[local_state.cur_rowgroup];
-	local_state.cur_vector            = 0;
-	local_state.n_tuples              = GetNTuples(local_state.cur_rowgroup);
+	local_state.cur_rowgroup = rowgroups_to_scan[global_state.next_rowgroup];
+	local_state.projection   = BuildReaderProjectionPlan(local_state.cur_rowgroup);
+	local_state.row_group_reader =
+	    CreateRowGroupReader(local_state.cur_rowgroup, local_state.projection.reader_column_ids);
+	local_state.row_group_base = row_group_offsets[local_state.cur_rowgroup];
+	local_state.cur_vector     = 0;
+	local_state.n_tuples       = GetNTuples(local_state.cur_rowgroup);
 
 	return true;
 }
@@ -460,30 +379,13 @@ void FastLanesReader::InitializeScanFilters(ClientContext& ctx, FastLanesReadLoc
 	}
 }
 
-void FastLanesReader::InitializePhysicalProjection(FastLanesReadLocalState& local_state) {
-	local_state.physical_projection_map.clear();
-	local_state.physical_projection_map.resize(column_ids.size());
-
-	for (idx_t i {0}; i < column_ids.size(); ++i) {
-		const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
-		if (IsFileRowNumberColumn(local_column_id)) {
-			continue;
-		}
-		auto it = local_state.expanded_column_index.find(static_cast<uint32_t>(local_column_id));
-		if (it == local_state.expanded_column_index.end()) {
-			throw InternalException("Missing projected column in expanded projection");
-		}
-		local_state.physical_projection_map[i] = optional_idx(it->second);
-	}
-}
-
 void FastLanesReader::InitializeColumnDecoders(FastLanesReadLocalState& local_state) {
 	if (local_state.column_decoders.size() != column_ids.size()) {
 		local_state.column_decoders.clear();
 		local_state.column_decoders.resize(column_ids.size());
 
 		for (idx_t i {0}; i < column_ids.size(); ++i) {
-			if (local_state.physical_projection_map[i].IsValid()) {
+			if (local_state.projection.output_to_reader_idx[i].IsValid()) {
 				local_state.column_decoders[i] = make_uniq<materializer::ColumnDecoder>();
 			}
 		}
@@ -495,13 +397,13 @@ void FastLanesReader::InitializeColumnDecoders(FastLanesReadLocalState& local_st
 		}
 	}
 
-	if (local_state.expanded_column_ids.empty()) {
+	if (!local_state.projection.has_physical_columns) {
 		return;
 	}
 
 	const auto& expressions = local_state.row_group_reader->get_chunk(0);
 	for (idx_t i {0}; i < column_ids.size(); ++i) {
-		auto physical_index = local_state.physical_projection_map[i];
+		auto physical_index = local_state.projection.output_to_reader_idx[i];
 		if (!physical_index.IsValid()) {
 			continue;
 		}
@@ -535,7 +437,7 @@ void FastLanesReader::DecodePhysicalColumns(FastLanesReadLocalState& local_state
                                             DataChunk&               chunk,
                                             idx_t                    start_vector,
                                             idx_t                    input_vector_count) {
-	if (!HasPhysicalProjection(local_state)) {
+	if (!local_state.projection.has_physical_columns) {
 		return;
 	}
 
@@ -546,7 +448,7 @@ void FastLanesReader::DecodePhysicalColumns(FastLanesReadLocalState& local_state
 		const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
 
 		for (idx_t i = 0; i < column_ids.size(); i++) {
-			auto physical_entry = local_state.physical_projection_map[i];
+			auto physical_entry = local_state.projection.output_to_reader_idx[i];
 			if (!physical_entry.IsValid()) {
 				continue;
 			}
@@ -603,7 +505,6 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	}
 
 	InitializeScanFilters(ctx, local_state);
-	InitializePhysicalProjection(local_state);
 	InitializeColumnDecoders(local_state);
 
 	// Mark the row group as consumed.
@@ -656,12 +557,17 @@ double FastLanesReader::GetProgressInFile(ClientContext& context) {
 	return 100.0 * (static_cast<double>(vectors_read.load()) / static_cast<double>(GetTotalVectors()));
 }
 
-FastLanesReader::ProjectionExpansion FastLanesReader::ExpandProjectedColumns(idx_t rowgroup_idx) {
-	const auto&           descriptor          = table_metadata->Descriptor();
-	const auto*           rowgroup_descriptor = descriptor.m_rowgroup_descriptors()->Get(rowgroup_idx);
-	const auto            column_count        = static_cast<idx_t>(rowgroup_descriptor->m_column_descriptors()->size());
+FastLanesReaderProjectionPlan FastLanesReader::BuildReaderProjectionPlan(idx_t rowgroup_idx) {
+	const auto& descriptor          = table_metadata->Descriptor();
+	const auto* rowgroup_descriptor = descriptor.m_rowgroup_descriptors()->Get(rowgroup_idx);
+	const auto  column_count        = static_cast<idx_t>(rowgroup_descriptor->m_column_descriptors()->size());
+	FastLanesReaderProjectionPlan plan;
+
+	plan.output_to_reader_idx.resize(column_ids.size());
 	std::vector<uint32_t> base_ids;
 	base_ids.reserve(column_ids.size());
+
+	// Collect the physical columns from the query
 	for (idx_t i = 0; i < column_ids.size(); i++) {
 		const auto col_idx = column_ids[MultiFileLocalIndex(i)].GetId();
 		if (IsFileRowNumberColumn(col_idx)) {
@@ -673,53 +579,37 @@ FastLanesReader::ProjectionExpansion FastLanesReader::ExpandProjectedColumns(idx
 		base_ids.emplace_back(static_cast<uint32_t>(col_idx));
 	}
 
+	// If any requested physical column uses MCC, fall back to reading the full row-group projection.
 	if (HasMccEncoding(*rowgroup_descriptor, base_ids)) {
-		ProjectionExpansion expansion;
-		expansion.expanded_ids.reserve(column_count);
+		plan.reader_column_ids.reserve(column_count);
 		for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
-			expansion.expanded_ids.emplace_back(static_cast<uint32_t>(col_idx));
+			plan.reader_column_ids.emplace_back(static_cast<uint32_t>(col_idx));
 		}
-		expansion.index_map.reserve(expansion.expanded_ids.size());
-		for (idx_t idx = 0; idx < expansion.expanded_ids.size(); ++idx) {
-			expansion.index_map.emplace(expansion.expanded_ids[idx], idx);
-		}
-		return expansion;
+	} else {
+		plan.reader_column_ids = base_ids;
 	}
 
-	std::vector<bool>    seen(column_count, false);
-	std::deque<uint32_t> queue;
-
-	for (auto col_id : base_ids) {
-		if (!seen[col_id]) {
-			seen[col_id] = true;
-			queue.push_back(col_id);
-		}
+	std::vector<optional_idx> reader_index_by_column_id(column_count);
+	for (idx_t idx = 0; idx < plan.reader_column_ids.size(); ++idx) {
+		const auto col_id                 = plan.reader_column_ids[idx];
+		reader_index_by_column_id[col_id] = optional_idx(idx);
 	}
 
-	std::vector<uint32_t> expanded_ids = base_ids;
-	while (!queue.empty()) {
-		const auto col_id = queue.front();
-		queue.pop_front();
-		const auto* column_descriptor = rowgroup_descriptor->m_column_descriptors()->Get(col_id);
-		const auto  dependency        = GetMccDependency(*column_descriptor, column_count);
-		if (!dependency.IsValid()) {
+	for (idx_t i = 0; i < column_ids.size(); ++i) {
+		const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
+		if (IsFileRowNumberColumn(local_column_id)) {
 			continue;
 		}
-		const auto dep = static_cast<uint32_t>(dependency.GetIndex());
-		if (!seen[dep]) {
-			seen[dep] = true;
-			expanded_ids.emplace_back(dep);
-			queue.push_back(dep);
+
+		auto reader_idx = reader_index_by_column_id[local_column_id];
+		if (!reader_idx.IsValid()) {
+			throw InternalException("Missing projected column in reader projection");
 		}
+		plan.output_to_reader_idx[i] = reader_idx;
 	}
 
-	ProjectionExpansion expansion;
-	expansion.expanded_ids = std::move(expanded_ids);
-	expansion.index_map.reserve(expansion.expanded_ids.size());
-	for (idx_t idx = 0; idx < expansion.expanded_ids.size(); ++idx) {
-		expansion.index_map.emplace(expansion.expanded_ids[idx], idx);
-	}
-	return expansion;
+	plan.has_physical_columns = !plan.reader_column_ids.empty();
+	return plan;
 }
 
 fastlanes::up<fastlanes::RowgroupReader>

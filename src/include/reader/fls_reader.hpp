@@ -13,7 +13,6 @@
 #include <atomic>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace duckdb {
@@ -62,10 +61,6 @@ public:
 
 private:
 	void Initialize();
-	struct ProjectionExpansion {
-		std::vector<uint32_t>               expanded_ids;
-		std::unordered_map<uint32_t, idx_t> index_map;
-	};
 	struct ScanBatch {
 		idx_t start_tuple = 0;
 		idx_t count = 0;
@@ -78,11 +73,8 @@ private:
 	static bool         IsExternalDictOperatorToken(fastlanes::OperatorToken token);
 	static bool         HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
 	                                   const std::vector<uint32_t>&         column_ids);
-	static optional_idx GetMccDependency(const fastlanes::ColumnDescriptor& column_descriptor, idx_t column_count);
-	static bool         HasPhysicalProjection(const FastLanesReadLocalState& local_state);
 	bool                TryAssignNextRowGroup(FastLanesReadGlobalState& global_state, FastLanesReadLocalState& local_state);
 	void                InitializeScanFilters(ClientContext& ctx, FastLanesReadLocalState& local_state);
-	void                InitializePhysicalProjection(FastLanesReadLocalState& local_state);
 	void                InitializeColumnDecoders(FastLanesReadLocalState& local_state);
 	ScanBatch           GetScanBatch(const FastLanesReadLocalState& local_state) const;
 	void                DecodePhysicalColumns(FastLanesReadLocalState& local_state,
@@ -93,7 +85,7 @@ private:
 	                                           DataChunk&               chunk,
 	                                           idx_t                    row_start,
 	                                           idx_t                    count);
-	ProjectionExpansion ExpandProjectedColumns(idx_t rowgroup_idx);
+	FastLanesReaderProjectionPlan BuildReaderProjectionPlan(idx_t rowgroup_idx);
 	const std::vector<idx_t>& GetRowGroupsToScan();
 	void EnsureFileRowNumberColumn();
 	bool IsFileRowNumberColumn(column_t column_id) const;

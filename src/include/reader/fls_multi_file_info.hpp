@@ -6,8 +6,8 @@
 #include "fls/reader/rowgroup_reader.hpp"
 #include "materializer/column_decoder.hpp"
 #include <duckdb/execution/adaptive_filter.hpp>
-#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace duckdb {
 struct FastLanesScanFilter;
@@ -39,6 +39,21 @@ struct FastLanesReadBindData final : TableFunctionData {
 	unique_ptr<FastLanesFileReaderOptions> options;
 };
 
+/**
+ * Per-row-group projection plan describing which physical columns must be read
+ * from the file and how output columns map onto that reader projection.
+ *
+ * This object is rowgroup-local, as encodings (including MCC dependencies) may differ across row groups.
+ */
+struct FastLanesReaderProjectionPlan {
+	//! Physical column ids passed to the row-group reader.
+	std::vector<uint32_t> reader_column_ids;
+	//! Mapping from output column index to row-group reader column index.
+	std::vector<optional_idx> output_to_reader_idx;
+	//! Flag that indicates if we need to read anything from the file at all.
+	bool has_physical_columns = false;
+};
+
 struct FastLanesReadLocalState final : LocalTableFunctionState {
 	idx_t n_tuples;
 	//! Row group which is being scanned by the worker, used to fetch row group related metadata.
@@ -57,12 +72,8 @@ struct FastLanesReadLocalState final : LocalTableFunctionState {
 	unique_ptr<AdaptiveFilter> adaptive_filter;
 	//!
 	std::vector<std::vector<FastLanesScanFilter*>> filters_by_col;
-	//! Mapping from projected columns to indices inside the physical row group reader results.
-	std::vector<optional_idx> physical_projection_map;
-	//! Expanded projection column ids (projected + MCC dependencies).
-	std::vector<uint32_t> expanded_column_ids;
-	//! Mapping from column id to expanded projection index.
-	std::unordered_map<uint32_t, idx_t> expanded_column_index;
+	//! Row-group-local projection plan from output columns to the physical reader projection.
+	FastLanesReaderProjectionPlan projection;
 };
 
 struct FastLanesReadGlobalState final : GlobalTableFunctionState {
