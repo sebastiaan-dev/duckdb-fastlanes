@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
+option(FLS_NO_TRANSPOSE "Use fastlanes::copy instead of untranspose" ON)
+
+if (FLS_NO_TRANSPOSE)
+    add_compile_definitions(FLS_NO_TRANSPOSE=0)
+endif ()
+
 # Set extension name here
 set(TARGET_NAME fastlanes)
 
@@ -19,11 +25,18 @@ set(EXTENSION_SOURCES src/fastlanes_extension.cpp
         src/read_fls.cpp
         src/reader/fls_multi_file_info.cpp
         src/reader/fls_reader.cpp
+        src/reader/row_group_statistics.cpp
+        src/reader/row_group_filter.cpp
+        src/reader/filter_executor.cpp
+        src/reader/schema_builder.cpp
+        src/reader/table_metadata.cpp
         src/reader/translation_utils.cpp
+        src/reader/fls_decode.cpp
+
         src/write_fls.cpp
-        src/writer/translation_utils.cpp
         src/writer/fls_view_writer.cpp
         src/writer/fls_writer.cpp
+        src/writer/translation_utils.cpp
 )
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
@@ -42,8 +55,8 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 
 FetchContent_Declare(
         fls_repo
-        GIT_REPOSITORY https://github.com/sebastiaan-dev/FastLanes.git
-        GIT_TAG update
+        GIT_REPOSITORY https://github.com/sebastiaan-dev/fastlanes-patched
+        GIT_TAG dev
 )
 
 FetchContent_MakeAvailable(fls_repo)
@@ -54,7 +67,7 @@ target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 #-----------------------------------------------------------------------------------------------------------------------
 
-#add_subdirectory(benchmarks)
+# add_subdirectory(scripts/data_generator/fls)
 
 install(
         TARGETS ${EXTENSION_NAME}

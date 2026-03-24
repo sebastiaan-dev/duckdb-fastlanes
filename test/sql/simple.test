@@ -1,0 +1,43 @@
+# name: test/sql/simple.test
+# description: Test loading FSST
+# group: [sql]
+
+require fastlanes
+
+statement ok
+install parquet
+
+statement ok
+load parquet
+
+statement ok
+set threads=1;
+
+# statement ok
+# describe select * from read_fls('benchmark/data/tpch/fls/tpch_sf10/lineitem.fls');
+
+# statement ok
+# create view lineitem_csv as select * from read_csv('benchmark/data/tpch/csv/tpch_sf0_1/lineitem.csv');
+
+# statement ok
+# create view customer_pq as select c_acctbal from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/customer.parquet');
+
+# statement ok
+# create view lineitem_pq as select l_tax from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/lineitem.parquet');
+# create view lineitem_pq as select * from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/lineitem.parquet');
+
+
+# statement ok
+# copy lineitem_pq to 'lineitem.tax.fls' (FORMAT fls);
+
+statement ok
+create view lineitem as select * from read_fls('/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/fls/tpch_sf10_rg65536_lineitem.fls');
+
+# statement ok
+# attach '/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/tpch/duckdb/tpch_sf10_rg65536.duckdb' as db;
+
+statement ok
+SELECT l_returnflag, l_linestatus, sum(l_quantity) AS sum_qty, sum(l_extendedprice) AS sum_base_price, sum(l_extendedprice * (1 - l_discount)) AS sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge, avg(l_quantity) AS avg_qty, avg(l_extendedprice) AS avg_price, avg(l_discount) AS avg_disc, count(*) AS count_order FROM lineitem WHERE l_shipdate <= CAST('1998-09-02' AS date) GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus;
+
+# statement ok
+# select count(distinct l_linestatus) from lineitem;

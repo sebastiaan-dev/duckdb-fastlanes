@@ -10,4 +10,4 @@ public:
 	static LogicalType TranslateType(fastlanes::DataType type);
 };
 
-}
+} // namespace duckdb

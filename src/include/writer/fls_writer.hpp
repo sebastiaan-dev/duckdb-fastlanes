@@ -5,11 +5,10 @@
 #include "duckdb/function/copy_function.hpp"
 #include "fls/connection.hpp"
 #include "fls/writer/rowgroup_writer.hpp"
-#include "fls/writer/writer.hpp"
+#include "fls/writer/file_writer.hpp"
 
 namespace duckdb {
 
-//! Options for writing FastLanes files
 struct FastLanesWriteBindData final : TableFunctionData {
 	//! Row group size, denoted in the tuple count. Must be a multiple of 1024.
 	uint64_t row_group_size = fastlanes::CFG::N_VEC_PER_RG * fastlanes::CFG::VEC_SZ;

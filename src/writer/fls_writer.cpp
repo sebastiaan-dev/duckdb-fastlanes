@@ -1,19 +1,19 @@
 
 
 #include "writer/fls_writer.hpp"
-
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
+#include "duckdb/common/types/decimal.hpp"
 #include "duckdb/function/copy_function.hpp"
-#include "fls/writer/writer.hpp"
+#include "fls/footer/decimal_type_generated.h"
 #include "writer/fls_view_writer.hpp"
 #include "writer/translation_utils.hpp"
 
-#include <thread>
-
 namespace duckdb {
 
-static void PrepareRowGroup(fastlanes::RowGroupWriter &rg_writer, const ColumnDataCollection &buf,
-                            const vector<LogicalType> &types) {
+static void PrepareRowGroup(fastlanes::RowGroupWriter&  rg_writer,
+                            const ColumnDataCollection& buf,
+                            const vector<LogicalType>&  types) {
 	const auto col_count = types.size();
 
 	vector<unique_ptr<ViewWriterFactoryBase>> buffers;
@@ -23,11 +23,11 @@ static void PrepareRowGroup(fastlanes::RowGroupWriter &rg_writer, const ColumnDa
 		buffers[col_idx] = MakeViewWriterFactory(types[col_idx].InternalType());
 	}
 
-	for (auto &chunk : buf.Chunks()) {
+	for (auto& chunk : buf.Chunks()) {
 		const auto vec_sz = chunk.size();
 
 		for (idx_t col_idx = 0; col_idx < col_count; col_idx++) {
-			auto &src = chunk.data[col_idx];
+			auto& src = chunk.data[col_idx];
 			src.Flatten(vec_sz);
 
 			auto view = buffers[col_idx]->Build(src, vec_sz);
@@ -38,16 +38,19 @@ static void PrepareRowGroup(fastlanes::RowGroupWriter &rg_writer, const ColumnDa
 	rg_writer.Finalize();
 }
 
-unique_ptr<LocalFunctionData> FastLanesFileWriter::InitLocal(ExecutionContext &context, FunctionData &bind_data_p) {
-	auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
+unique_ptr<LocalFunctionData> FastLanesFileWriter::InitLocal(ExecutionContext& context, FunctionData& bind_data_p) {
+	auto& bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 	return make_uniq<FastLanesWriteLocalState>(context.client, bind_data.types);
 }
 
-void FastLanesFileWriter::Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &global_state_p,
-                               LocalFunctionData &local_state_p, DataChunk &input) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
-	auto &local_state = local_state_p.Cast<FastLanesWriteLocalState>();
+void FastLanesFileWriter::Sink(ExecutionContext&   context,
+                               FunctionData&       bind_data_p,
+                               GlobalFunctionData& global_state_p,
+                               LocalFunctionData&  local_state_p,
+                               DataChunk&          input) {
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
+	auto&       global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+	auto&       local_state  = local_state_p.Cast<FastLanesWriteLocalState>();
 
 	if (local_state.buffer.Count() + input.size() < bind_data.row_group_size) {
 		local_state.buffer.Append(local_state.append_state, input);
@@ -71,7 +74,7 @@ void FastLanesFileWriter::Sink(ExecutionContext &context, FunctionData &bind_dat
 
 	if (local_state.buffer.Count() + input.size() > bind_data.row_group_size) {
 		const idx_t space_left = bind_data.row_group_size - local_state.buffer.Count();
-		const idx_t take = MinValue<idx_t>(space_left, input.size());
+		const idx_t take       = MinValue<idx_t>(space_left, input.size());
 
 		DataChunk fill_chunk;
 		fill_chunk.Initialize(context.client, bind_data.types);
@@ -98,11 +101,13 @@ void FastLanesFileWriter::Sink(ExecutionContext &context, FunctionData &bind_dat
 	}
 }
 
-void FastLanesFileWriter::Combine(ExecutionContext &context, FunctionData &bind_data_p,
-                                  GlobalFunctionData &global_state_p, LocalFunctionData &local_state_p) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
-	auto &local_state = local_state_p.Cast<FastLanesWriteLocalState>();
+void FastLanesFileWriter::Combine(ExecutionContext&   context,
+                                  FunctionData&       bind_data_p,
+                                  GlobalFunctionData& global_state_p,
+                                  LocalFunctionData&  local_state_p) {
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
+	auto&       global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+	auto&       local_state  = local_state_p.Cast<FastLanesWriteLocalState>();
 
 	// Nothing to do, leave the combine buffer for other threads.
 	if (local_state.buffer.Count() == 0) {
@@ -146,7 +151,7 @@ void FastLanesFileWriter::Combine(ExecutionContext &context, FunctionData &bind_
 
 			// The current chunk does not fit.
 			const idx_t space_left = bind_data.row_group_size - global_state.combine_buffer->Count();
-			const idx_t take = MinValue<idx_t>(space_left, src_chunk.size());
+			const idx_t take       = MinValue<idx_t>(space_left, src_chunk.size());
 
 			// Fit into a destination chunk.
 			DataChunk dst_chunk;
@@ -181,17 +186,18 @@ void FastLanesFileWriter::Combine(ExecutionContext &context, FunctionData &bind_
 	}
 }
 
-bool FastLanesFileWriter::RotateFiles(FunctionData &bind_data_p, const optional_idx &file_size_bytes) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
+bool FastLanesFileWriter::RotateFiles(FunctionData& bind_data_p, const optional_idx& file_size_bytes) {
+	const auto& bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
 	// We only rotate files if there is a limit on how much data we can store in one file.
 	return bind_data.row_groups_per_file;
 }
 
-bool FastLanesFileWriter::RotateNextFile(GlobalFunctionData &global_state_p, FunctionData &bind_data_p,
-                                         const optional_idx &file_size_bytes) {
-	const auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
+bool FastLanesFileWriter::RotateNextFile(GlobalFunctionData& global_state_p,
+                                         FunctionData&       bind_data_p,
+                                         const optional_idx& file_size_bytes) {
+	const auto& global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
 
 	if (!bind_data.row_groups_per_file) {
 		return false;
@@ -204,11 +210,13 @@ bool FastLanesFileWriter::RotateNextFile(GlobalFunctionData &global_state_p, Fun
 	return false;
 }
 
-unique_ptr<FunctionData> FastLanesFileWriter::Bind(ClientContext &context, CopyFunctionBindInput &input,
-                                                   const vector<string> &names, const vector<LogicalType> &sql_types) {
+unique_ptr<FunctionData> FastLanesFileWriter::Bind(ClientContext&             context,
+                                                   CopyFunctionBindInput&     input,
+                                                   const vector<string>&      names,
+                                                   const vector<LogicalType>& sql_types) {
 	auto data = make_uniq<FastLanesWriteBindData>();
 
-	for (const auto &[name, values] : input.info.options) {
+	for (const auto& [name, values] : input.info.options) {
 		const auto key = StringUtil::Lower(name);
 		if (values.size() != 1) {
 			throw BinderException("Only one value allowed per option.");
@@ -231,10 +239,10 @@ unique_ptr<FunctionData> FastLanesFileWriter::Bind(ClientContext &context, CopyF
 	return data;
 }
 
-unique_ptr<GlobalFunctionData> FastLanesFileWriter::InitGlobal(ClientContext &context, FunctionData &bind_data_p,
-                                                               const string &file_path) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	auto global_state = make_uniq<FastLanesWriteGlobalState>(file_path);
+unique_ptr<GlobalFunctionData>
+FastLanesFileWriter::InitGlobal(ClientContext& context, FunctionData& bind_data_p, const string& file_path) {
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
+	auto        global_state = make_uniq<FastLanesWriteGlobalState>(file_path);
 
 	std::vector<std::unique_ptr<fastlanes::ColumnDescriptorT>> descriptors;
 	descriptors.reserve(bind_data.names.size());
@@ -243,8 +251,19 @@ unique_ptr<GlobalFunctionData> FastLanesFileWriter::InitGlobal(ClientContext &co
 	for (size_t i = 0; i < bind_data.types.size(); ++i) {
 		auto col = make_uniq<fastlanes::ColumnDescriptorT>();
 
-		col->name = bind_data.names.at(i);
-		col->data_type = WriterTranslateUtils::TranslateType(bind_data.types.at(i));
+		col->name                = bind_data.names.at(i);
+		const auto& logical_type = bind_data.types.at(i);
+		col->data_type           = WriterTranslateUtils::TranslateType(logical_type);
+
+		if (logical_type.id() == LogicalTypeId::DECIMAL) {
+			const auto width = DecimalType::GetWidth(logical_type);
+			const auto scale = DecimalType::GetScale(logical_type);
+
+			auto decimal_info = make_uniq<fastlanes::DecimalTypeT>();
+			decimal_info->precision = width;
+			decimal_info->scale = scale;
+			col->fix_me_decimal_type = std::move(decimal_info);
+		}
 
 		descriptors.push_back(std::move(col));
 	}
@@ -278,18 +297,19 @@ CopyFunctionExecutionMode FastLanesFileWriter::GetExecutionMode(const bool prese
 	return CopyFunctionExecutionMode::REGULAR_COPY_TO_FILE;
 }
 
-idx_t FastLanesFileWriter::GetDesiredBatchsize(ClientContext &context, FunctionData &bind_data_p) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
+idx_t FastLanesFileWriter::GetDesiredBatchsize(ClientContext& context, FunctionData& bind_data_p) {
+	const auto& bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
 
 	return bind_data.row_group_size;
 }
 
-unique_ptr<PreparedBatchData> FastLanesFileWriter::PrepareBatch(ClientContext &context, FunctionData &bind_data_p,
-                                                                GlobalFunctionData &global_state_p,
+unique_ptr<PreparedBatchData> FastLanesFileWriter::PrepareBatch(ClientContext&                   context,
+                                                                FunctionData&                    bind_data_p,
+                                                                GlobalFunctionData&              global_state_p,
                                                                 unique_ptr<ColumnDataCollection> collection) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	const auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
-	auto batch_data = make_uniq<FastLanesWriteBatchData>();
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
+	const auto& global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+	auto        batch_data   = make_uniq<FastLanesWriteBatchData>();
 
 	batch_data->rg_writer = global_state.writer->CreateRowGroupWriter();
 	PrepareRowGroup(*batch_data->rg_writer, *collection, bind_data.types);
@@ -297,20 +317,23 @@ unique_ptr<PreparedBatchData> FastLanesFileWriter::PrepareBatch(ClientContext &c
 	return batch_data;
 }
 
-void FastLanesFileWriter::FlushBatch(ClientContext &context, FunctionData &bind_data,
-                                     GlobalFunctionData &global_state_p, PreparedBatchData &batch_p) {
-	auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+void FastLanesFileWriter::FlushBatch(ClientContext&      context,
+                                     FunctionData&       bind_data,
+                                     GlobalFunctionData& global_state_p,
+                                     PreparedBatchData&  batch_p) {
+	auto& global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
 
-	const auto &batch_data = batch_p.Cast<FastLanesWriteBatchData>();
+	const auto& batch_data = batch_p.Cast<FastLanesWriteBatchData>();
 	batch_data.rg_writer->Flush();
 
 	global_state.num_row_groups++;
 }
 
-void FastLanesFileWriter::Finalize(ClientContext &context, FunctionData &bind_data_p,
-                                   GlobalFunctionData &global_state_p) {
-	const auto &bind_data = bind_data_p.Cast<FastLanesWriteBindData>();
-	auto &global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
+void FastLanesFileWriter::Finalize(ClientContext&      context,
+                                   FunctionData&       bind_data_p,
+                                   GlobalFunctionData& global_state_p) {
+	const auto& bind_data    = bind_data_p.Cast<FastLanesWriteBindData>();
+	auto&       global_state = global_state_p.Cast<FastLanesWriteGlobalState>();
 
 	if (global_state.combine_buffer) {
 		const auto rg_writer = global_state.writer->CreateRowGroupWriter();
