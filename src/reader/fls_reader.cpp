@@ -155,6 +155,12 @@ optional_idx FastLanesReader::GetMccDependency(const fastlanes::ColumnDescriptor
 	return optional_idx();
 }
 
+bool FastLanesReader::HasPhysicalProjection(const FastLanesReadLocalState& local_state) {
+	return std::any_of(local_state.physical_projection_map.begin(),
+	                   local_state.physical_projection_map.end(),
+	                   [](const optional_idx& entry) { return entry.IsValid(); });
+}
+
 // FIXME:
 // - Late initialization with projected columns for statistics
 // - Even more so, do we need to construct all columns or can we do away with all other columns?
@@ -432,7 +438,7 @@ bool FastLanesReader::TryAssignNextRowGroup(FastLanesReadGlobalState& global_sta
 	local_state.row_group_reader      = CreateRowGroupReader(local_state.cur_rowgroup, local_state.expanded_column_ids);
 	local_state.row_group_base        = row_group_offsets[local_state.cur_rowgroup];
 	local_state.cur_vector            = 0;
-	local_state.n_tuples = GetNTuples(local_state.cur_rowgroup);
+	local_state.n_tuples              = GetNTuples(local_state.cur_rowgroup);
 
 	return true;
 }
@@ -519,6 +525,81 @@ void FastLanesReader::InitializeColumnDecoders(FastLanesReadLocalState& local_st
 	}
 }
 
+FastLanesReader::ScanBatch FastLanesReader::GetScanBatch(const FastLanesReadLocalState& local_state) const {
+	ScanBatch batch;
+	batch.start_tuple = local_state.cur_vector * fastlanes::CFG::VEC_SZ;
+	if (batch.start_tuple >= local_state.n_tuples) {
+		return batch;
+	}
+
+	const idx_t tuples_left  = local_state.n_tuples - batch.start_tuple;
+	batch.count              = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 2);
+	batch.input_vector_count = (batch.count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
+
+	return batch;
+}
+
+void FastLanesReader::DecodePhysicalColumns(FastLanesReadLocalState& local_state,
+                                            DataChunk&               chunk,
+                                            idx_t                    start_vector,
+                                            idx_t                    input_vector_count) {
+	if (!HasPhysicalProjection(local_state)) {
+		return;
+	}
+
+	const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup);
+
+	for (idx_t batch_idx = 0; batch_idx < input_vector_count; batch_idx++) {
+		const idx_t vector_idx  = start_vector + batch_idx;
+		const auto& expressions = local_state.row_group_reader->get_chunk(vector_idx);
+
+		for (idx_t i = 0; i < column_ids.size(); i++) {
+			auto physical_entry = local_state.physical_projection_map[i];
+			if (!physical_entry.IsValid()) {
+				continue;
+			}
+
+			auto&      target_col = chunk.data[i];
+			const auto expr       = expressions[physical_entry.GetIndex()];
+			expr->PointTo(vector_idx);
+			auto& op = expr->operators[expr->operators.size() - 1];
+
+			const auto  local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
+			const auto& src_type        = rowgroup_descriptor.m_column_descriptors()->Get(local_column_id)->data_type();
+
+			if (batch_idx == 0) {
+				local_state.column_decoders[i]->Decode<materializer::Pass::First>(op, src_type, target_col, vector_idx);
+			} else {
+				local_state.column_decoders[i]->Decode<materializer::Pass::Second>(
+				    op, src_type, target_col, vector_idx);
+			}
+		}
+	}
+}
+
+void FastLanesReader::PopulateVirtualColumns(const FastLanesReadLocalState& local_state,
+                                             DataChunk&                     chunk,
+                                             idx_t                          row_start,
+                                             idx_t                          count) {
+	for (idx_t i = 0; i < column_ids.size(); i++) {
+		if (const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
+		    !IsFileRowNumberColumn(local_column_id)) {
+			continue;
+		}
+
+		auto& target_col = chunk.data[i];
+
+		// TODO: This can probably be removed.
+		target_col.SetVectorType(VectorType::FLAT_VECTOR);
+		FlatVector::Validity(target_col).Reset();
+
+		const auto data = FlatVector::GetData<int64_t>(target_col);
+		for (idx_t row = 0; row < count; ++row) {
+			data[row] = static_cast<int64_t>(row_start + row);
+		}
+	}
+}
+
 bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
                                         GlobalTableFunctionState& global_state_p,
                                         LocalTableFunctionState&  local_state_p) {
@@ -546,77 +627,22 @@ void FastLanesReader::Scan(ClientContext&            context,
 	auto& local_state = local_state_p.Cast<FastLanesReadLocalState>();
 
 	while (true) {
-		const auto  cur_vec     = local_state.cur_vector;
-		const idx_t start_tuple = cur_vec * fastlanes::CFG::VEC_SZ;
-		if (start_tuple >= local_state.n_tuples) {
+		const auto batch = GetScanBatch(local_state);
+		if (!batch.IsValid()) {
 			return;
 		}
 
-		const idx_t tuples_left        = local_state.n_tuples - start_tuple;
-		const idx_t count              = std::min(tuples_left, fastlanes::CFG::VEC_SZ * 2);
-		const auto  input_vector_count = (count + fastlanes::CFG::VEC_SZ - 1) / fastlanes::CFG::VEC_SZ;
-		if (!input_vector_count) {
-			return;
-		}
+		DecodePhysicalColumns(local_state, chunk, local_state.cur_vector, batch.input_vector_count);
 
-		const bool has_physical_columns = std::any_of(local_state.physical_projection_map.begin(),
-		                                              local_state.physical_projection_map.end(),
-		                                              [](const optional_idx& entry) { return entry.IsValid(); });
+		const idx_t row_start = local_state.row_group_base + batch.start_tuple;
+		PopulateVirtualColumns(local_state, chunk, row_start, batch.count);
 
-		// Try to fill up to the standard vector size.
-		for (idx_t batch_idx = 0; batch_idx < input_vector_count; batch_idx++) {
-			const idx_t vector_idx = cur_vec + batch_idx;
-			if (has_physical_columns) {
-				const auto& rowgroup_descriptor = table_metadata->RowGroupDescriptor(local_state.cur_rowgroup);
-				const auto& expressions         = local_state.row_group_reader->get_chunk(vector_idx);
-				for (idx_t i = 0; i < column_ids.size(); i++) {
-					auto physical_entry = local_state.physical_projection_map[i];
-					if (!physical_entry.IsValid()) {
-						continue;
-					}
-					auto&      target_col = chunk.data[i];
-					const auto expr       = expressions[physical_entry.GetIndex()];
-
-					expr->PointTo(vector_idx);
-					auto& op = expr->operators[expr->operators.size() - 1];
-
-					const auto& src_type = rowgroup_descriptor.m_column_descriptors()
-					                           ->Get(column_ids[MultiFileLocalIndex(i)].GetId())
-					                           ->data_type();
-
-					if (batch_idx == 0) {
-						local_state.column_decoders[i]->Decode<materializer::Pass::First>(
-						    op, src_type, target_col, vector_idx);
-					} else {
-						local_state.column_decoders[i]->Decode<materializer::Pass::Second>(
-						    op, src_type, target_col, vector_idx);
-					}
-				}
-			}
-		}
-
-		const idx_t row_start = local_state.row_group_base + start_tuple;
-		for (idx_t i = 0; i < column_ids.size(); i++) {
-			if (const auto local_column_id = column_ids[MultiFileLocalIndex(i)].GetId();
-			    !IsFileRowNumberColumn(local_column_id)) {
-				continue;
-			}
-			auto& target_col = chunk.data[i];
-			// TODO: This can probably be removed.
-			target_col.SetVectorType(VectorType::FLAT_VECTOR);
-			FlatVector::Validity(target_col).Reset();
-			const auto data = FlatVector::GetData<int64_t>(target_col);
-			for (idx_t row = 0; row < count; ++row) {
-				data[row] = static_cast<int64_t>(row_start + row);
-			}
-		}
-
-		chunk.SetCardinality(count);
+		chunk.SetCardinality(batch.count);
 
 		FilterExecutor::Apply(chunk, local_state.adaptive_filter, local_state.scan_filters, filters.get());
 
-		local_state.cur_vector += input_vector_count;
-		vectors_read += input_vector_count;
+		local_state.cur_vector += batch.input_vector_count;
+		vectors_read += batch.input_vector_count;
 
 		if (chunk.size() == 0) {
 			chunk.Reset();
