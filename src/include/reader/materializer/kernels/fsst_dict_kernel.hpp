@@ -4,7 +4,6 @@
 #include "reader/materializer/context.hpp"
 #include <duckdb/common/types/string_type.hpp>
 #include <duckdb/common/types/vector.hpp>
-#include <duckdb/planner/filter/in_filter.hpp>
 #include <fls/expression/fsst_dict_operator.hpp>
 
 namespace duckdb::materializer {
@@ -43,24 +42,12 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 			const data_ptr_t buf     = str_buffer.AllocateShrinkableBuffer(max_out);
 
 			const auto decoded_size = static_cast<fastlanes::ofs_t>(
-			    test_fsst_decode(&op.fsst_decoder, enc_len, in_byte_arr + prev_end, max_out, buf));
+			    fsst_decode(&op.fsst_decoder, enc_len, in_byte_arr + prev_end, max_out, buf));
 
 			child_ptr[i] = str_buffer.FinalizeShrinkableBuffer(buf, max_out, decoded_size);
 
 			prev_end = end;
 		}
-
-		// if (scan_filters && !scan_filters->empty()) {
-		// 	for (auto* sf : *scan_filters) {
-		//		First do some precondition checks before setting this, otherwise the ApplyFilter will use the direct
-		//		filter on incompatible types.
-		// 		if (auto* existing = sf->ctx.Maybe<FSSTDictFilterCtx, DirectFilterKind::DictMask>()) {
-		// 			// BuildAllowedIds(f, child_ptr, c.dict_size);
-		// 		} else {
-		// 			auto& sf_ctx = sf->ctx.Emplace<FSSTDictFilterCtx>();
-		// 		}
-		// 	}
-		// }
 	}
 
 	template <Pass PASS>
