@@ -4,26 +4,6 @@ This repository contains the DuckDB extension for [FastLanes](https://github.com
 ## Supported platforms
 Currently the extension is not precompiled for any target.
 
-## How to use
-Installing the fastlanes extension can be done through the commands provided by DuckDB.
-
-```sql
-INSTALL fastlanes from TODO;
-LOAD fastlanes;
-```
-
-### Downloading artifacts from GitHub
-The default CI in this template will automatically upload the binaries for every push to the main branch as GitHub Actions artifacts. These
-can be downloaded manually and then loaded directly using:
-```SQL
-LOAD '/path/to/downloaded/extension.duckdb_extension';
-```
-Note that this will require starting DuckDB with the
-`allow_unsigned_extensions` option set to true. How to set this will depend on the client you're using. For the CLI it is done like:
-```shell
-duckdb -unsigned
-```
-
 ## Developing
 ### Getting started
 First step to getting started is to clone the repository using:
