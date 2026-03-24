@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 
 option(FLS_NO_TRANSPOSE "Use fastlanes::copy instead of untranspose" ON)
 
-if(FLS_NO_TRANSPOSE)
+if (FLS_NO_TRANSPOSE)
     add_compile_definitions(FLS_NO_TRANSPOSE=0)
-endif()
+endif ()
 
 # Set extension name here
 set(TARGET_NAME fastlanes)
@@ -53,15 +53,13 @@ option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
 add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-set(FASTLANES_DIR "/Users/sebastiaan/repos/fls-patch-projection")
-add_subdirectory(${FASTLANES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/FastLanes_build)
-#FetchContent_Declare(
-#        fls_repo
-#        GIT_REPOSITORY https://github.com/cwida/FastLanes
-#        GIT_TAG dev
-#)
+FetchContent_Declare(
+        fls_repo
+        GIT_REPOSITORY https://github.com/sebastiaan-dev/fastlanes-patched
+        GIT_TAG dev
+)
 
-#FetchContent_MakeAvailable(fls_repo)
+FetchContent_MakeAvailable(fls_repo)
 include_directories(${fls_repo_SOURCE_DIR}/include)
 
 
