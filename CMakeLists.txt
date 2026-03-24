@@ -48,7 +48,6 @@ message(STATUS "C++: ${CMAKE_CXX_COMPILER} (ID=${CMAKE_CXX_COMPILER_ID})")
 #-----------------------------------------------------------------------------------------------------------------------
 include(FetchContent)
 option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
-#### TODO: enable
 option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
 add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -66,8 +65,6 @@ include_directories(${fls_repo_SOURCE_DIR}/include)
 target_link_libraries(${EXTENSION_NAME} FastLanes)
 target_link_libraries(${LOADABLE_EXTENSION_NAME} FastLanes)
 #-----------------------------------------------------------------------------------------------------------------------
-
-# add_subdirectory(scripts/data_generator/fls)
 
 install(
         TARGETS ${EXTENSION_NAME}
