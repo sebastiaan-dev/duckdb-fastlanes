@@ -57,7 +57,7 @@ struct FastLanesReaderProjectionPlan {
 struct FastLanesReadLocalState final : LocalTableFunctionState {
 	//! Keep filter references alive and detect transitions between file readers.
 	shared_ptr<BaseFileReader> scan_reader;
-	idx_t n_tuples;
+	idx_t                      n_tuples;
 	//! Row group which is being scanned by the worker, used to fetch row group related metadata.
 	idx_t cur_rowgroup;
 	//! Vector in the row group that is up for decoding, starts at 0 for every row group.

@@ -57,8 +57,8 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 	                    const std::vector<FastLanesScanFilter*>*) {
 		auto& c = ctx.Emplace<FSSTDictColumnCtx>();
 
-		c.dict_size = op.dict_offsets_segment.data_span.size() / sizeof(fastlanes::ofs_t);
-		c.dictionary = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
+		c.dict_size      = op.dict_offsets_segment.data_span.size() / sizeof(fastlanes::ofs_t);
+		c.dictionary     = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
 		auto& dictionary = c.dictionary->data;
 
 		const auto  child_ptr = GetDataPtr<Pass::First, string_t>(dictionary);
@@ -67,9 +67,9 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 
 		fastlanes::ofs_t prev_end = 0;
 		for (fastlanes::n_t i {0}; i < c.dict_size; ++i) {
-			const auto cur  = detail::LoadValue<fastlanes::ofs_t>(offsets + i * sizeof(fastlanes::ofs_t));
-			child_ptr[i] = StringVector::AddString(
-			    dictionary, reinterpret_cast<const char*>(bytes + prev_end), cur - prev_end);
+			const auto cur = detail::LoadValue<fastlanes::ofs_t>(offsets + i * sizeof(fastlanes::ofs_t));
+			child_ptr[i] =
+			    StringVector::AddString(dictionary, reinterpret_cast<const char*>(bytes + prev_end), cur - prev_end);
 			prev_end = cur;
 		}
 	}
@@ -85,8 +85,8 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 			// Output chunks may retain their selection buffer after the next scan.
 			c.sel_vec = make_uniq<SelectionVector>(STANDARD_VECTOR_SIZE);
 		}
-		auto index = op.Index();
-		auto& sel = *c.sel_vec;
+		auto  index = op.Index();
+		auto& sel   = *c.sel_vec;
 
 		if constexpr (PASS == Pass::First) {
 			for (idx_t i = 0; i < 1024; ++i) {

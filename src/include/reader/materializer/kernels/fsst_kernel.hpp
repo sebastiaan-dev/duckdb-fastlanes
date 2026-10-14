@@ -19,8 +19,8 @@ struct KernelTraits<fastlanes::dec_fsst_opr> {
 	template <Pass PASS>
 	static void
 	Decode(ColumnCtxHandle& ctx, Vector& target_col, idx_t, fastlanes::dec_fsst_opr& opr, fastlanes::DataType&) {
-		auto& str_buffer  = StringVector::GetStringBuffer(target_col);
-		auto target_ptr = GetDataPtr<PASS, string_t>(target_col);
+		auto& str_buffer = StringVector::GetStringBuffer(target_col);
+		auto  target_ptr = GetDataPtr<PASS, string_t>(target_col);
 
 		generated::untranspose::fallback::scalar::untranspose_i(opr.offset_arr, opr.untrasposed_offset);
 
@@ -46,9 +46,9 @@ struct KernelTraits<fastlanes::dec_fsst_opr> {
 		}
 
 		for (idx_t i = 0; i < fastlanes::CFG::VEC_SZ; ++i) {
-			const fastlanes::len_t enc = sizes[i];
-			const idx_t max_out = static_cast<idx_t>(enc) * 8;
-			const data_ptr_t buf = str_buffer.AllocateShrinkableBuffer(max_out);
+			const fastlanes::len_t enc     = sizes[i];
+			const idx_t            max_out = static_cast<idx_t>(enc) * 8;
+			const data_ptr_t       buf     = str_buffer.AllocateShrinkableBuffer(max_out);
 
 			const auto decoded =
 			    static_cast<fastlanes::ofs_t>(fsst_decompress(&opr.fsst_decoder, enc, in_ptrs[i], max_out, buf));

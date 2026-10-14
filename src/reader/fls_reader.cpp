@@ -524,9 +524,9 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 }
 
 AsyncResult FastLanesReader::Scan(ClientContext&            context,
-                           GlobalTableFunctionState& global_state_p,
-                           LocalTableFunctionState&  local_state_p,
-                           DataChunk&                chunk) {
+                                  GlobalTableFunctionState& global_state_p,
+                                  LocalTableFunctionState&  local_state_p,
+                                  DataChunk&                chunk) {
 	auto& local_state = local_state_p.Cast<FastLanesReadLocalState>();
 
 	while (true) {

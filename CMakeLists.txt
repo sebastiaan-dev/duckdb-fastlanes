@@ -17,6 +17,9 @@ project(${TARGET_NAME})
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard" FORCE)
 set(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "Require C++ standard" FORCE)
 set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Disable extensions" FORCE)
+# We use C++20, but no modules. Avoid generated .modmap response files in the
+# compilation database: configure-only clang-tidy runs cannot read those files.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE CACHE BOOL "Position Independent Code" FORCE)
 
 include_directories(src/include)
@@ -63,7 +66,7 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 # reruns the patch step when this patch series changes.
 set(FLS_PATCH_SIGNATURE "")
 foreach(patch_file cmake/patch_fastlanes.cmake patches/fastlanes-build.patch
-                   patches/fastlanes-branch-consolidation.patch)
+                   patches/fastlanes-branch-consolidation.patch patches/fastlanes-ci.patch)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}")
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}" patch_hash)
     string(APPEND FLS_PATCH_SIGNATURE "${patch_hash}")

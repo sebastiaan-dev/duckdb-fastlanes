@@ -23,8 +23,8 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	                    const std::vector<FastLanesScanFilter*>* scan_filters) {
 		auto& c = ctx.Emplace<FSSTDictColumnCtx>();
 
-		c.dict_size = op.fsst_offset_segment_view.data_span.size() / sizeof(fastlanes::ofs_t);
-		c.dictionary = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
+		c.dict_size      = op.fsst_offset_segment_view.data_span.size() / sizeof(fastlanes::ofs_t);
+		c.dictionary     = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
 		auto& dictionary = c.dictionary->data;
 
 		auto& str_buffer = StringVector::GetStringBuffer(dictionary);
@@ -58,8 +58,8 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 			// Output chunks may retain their selection buffer after the next scan.
 			c.sel_vec = make_uniq<SelectionVector>(STANDARD_VECTOR_SIZE);
 		}
-		auto index = op.Index();
-		auto& sel = *c.sel_vec;
+		auto  index = op.Index();
+		auto& sel   = *c.sel_vec;
 
 		// TODO: To make this fast we need to know if there will be 2 passes or only one.
 		// Do we want to add a third function call to the Kernel API that does a potential finishing pass per vector?

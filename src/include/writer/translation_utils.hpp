@@ -13,7 +13,7 @@ public:
 	 * @param type The DuckDB LogicalType to translate
 	 * @return fastlanes::DataType The corresponding FastLanes DataType
 	 */
-	static fastlanes::DataType TranslateType(const LogicalType &type);
+	static fastlanes::DataType TranslateType(const LogicalType& type);
 };
 
 } // namespace duckdb

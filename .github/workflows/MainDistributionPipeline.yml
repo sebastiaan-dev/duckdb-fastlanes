@@ -1,6 +1,5 @@
-#
-# This workflow calls the main distribution pipeline from DuckDB to build, test and (optionally) release the extension
-#
+# FastLanes requires Clang. The generic distribution workflow selects GCC on
+# Linux and MSVC on Windows, so build the same supported targets explicitly.
 name: Main Extension Distribution Pipeline
 on:
   push:
@@ -9,34 +8,115 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  duckdb-next-build:
-    name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
-    if: false   # extension-template is currently not compatible with main
-    with:
-      duckdb_version: main
-      ci_tools_version: main
-      extension_name: fastlanes
-      exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools;windows_amd64_mingw;linux_amd64_musl;linux_amd64_gcc4'
+  build:
+    name: Build and test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux_amd64
+            image: quay.io/pypa/manylinux_2_28_x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux_arm64
+            image: quay.io/pypa/manylinux_2_28_aarch64
+          - os: macos-15-intel
+            platform: osx_amd64
+          - os: macos-15
+            platform: osx_arm64
+          - os: windows-2022
+            platform: windows_amd64
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: clang
+      CXX: clang++
+      GEN: ninja
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      DUCKDB_PLATFORM: ${{ matrix.platform }}
+      EXT_FLAGS: -DFLS_BUILD_STANDALONE_TESTS=ON
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Verify DuckDB release metadata
+        run: |
+          git -C duckdb fetch origin tag v1.5.6 --no-tags
+          test "$(git -C duckdb rev-parse HEAD)" = "$(git -C duckdb rev-parse 'v1.5.6^{commit}')"
+      - uses: actions/setup-python@v5
+        if: runner.os != 'Linux'
+        with:
+          python-version: '3.12'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Install build tools
+        if: runner.os != 'Linux'
+        run: python -m pip install cmake==3.31.6 ninja
+      - name: Build and test (manylinux, glibc 2.28)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            -e CC -e CXX -e GEN -e CMAKE_BUILD_PARALLEL_LEVEL \
+            -e DUCKDB_PLATFORM -e EXT_FLAGS \
+            "${{ matrix.image }}" bash -euxo pipefail -c '
+              yum install -y clang
+              export PATH=/opt/python/cp312-cp312/bin:$PATH
+              python -m pip install cmake==3.31.6 ninja
+              # Use the modern manylinux GCC headers/runtime with the Clang driver.
+              export CXXFLAGS="--gcc-toolchain=$(dirname "$(dirname "$(readlink -f "$(command -v gcc)")")")"
+              git config --global --add safe.directory "*"
+              clang --version
+              make release
+              make test
+              build/release/_deps/fls_repo-build/test/standalone/fastlanes_integration_test
+            '
+      - name: Build and test (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: |
+          clang --version
+          make release
+          make test
+          build/release/_deps/fls_repo-build/test/standalone/fastlanes_integration_test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastlanes-v1.5.6-extension-${{ matrix.platform }}
+          path: build/release/extension/fastlanes/fastlanes.duckdb_extension
+          if-no-files-found: error
 
-  duckdb-stable-build:
-    name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5.6
-    with:
-      duckdb_version: v1.5.6
-      ci_tools_version: v1.5.6
-      extension_name: fastlanes
-      exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools;windows_amd64_mingw;linux_amd64_musl;linux_amd64_gcc4'
-
-  code-quality-check:
+  format:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5.6
     with:
       duckdb_version: v1.5.6
       ci_tools_version: v1.5.6
       extension_name: fastlanes
-      format_checks: 'format;tidy'
+      format_checks: format
+
+  tidy:
+    name: Tidy Check
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-18
+      CXX: clang++-18
+      GEN: ninja
+      TIDY_BINARY: clang-tidy-18
+      TIDY_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
+      - name: Check all extension reader/writer translation units
+        run: make tidy-check

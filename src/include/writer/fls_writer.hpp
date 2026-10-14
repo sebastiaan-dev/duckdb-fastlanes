@@ -18,11 +18,11 @@ struct FastLanesWriteBindData final : TableFunctionData {
 	bool inline_footer = true;
 
 	vector<LogicalType> types;
-	vector<string> names;
+	vector<string>      names;
 };
 
 struct FastLanesWriteLocalState final : LocalFunctionData {
-	explicit FastLanesWriteLocalState(ClientContext &context, const vector<LogicalType> &types)
+	explicit FastLanesWriteLocalState(ClientContext& context, const vector<LogicalType>& types)
 	    : buffer(context, types) {
 		buffer.SetPartitionIndex(0); // Makes the buffer manager less likely to spill this data
 		buffer.InitializeAppend(append_state);
@@ -30,7 +30,7 @@ struct FastLanesWriteLocalState final : LocalFunctionData {
 
 	std::unique_ptr<fastlanes::RowGroupWriter> rg_writer;
 
-	ColumnDataCollection buffer;
+	ColumnDataCollection  buffer;
 	ColumnDataAppendState append_state;
 	//! Current row group being written
 	idx_t current_row_group = 0;
@@ -39,17 +39,19 @@ struct FastLanesWriteLocalState final : LocalFunctionData {
 };
 
 struct FastLanesWriteGlobalState final : GlobalFunctionData {
-	explicit FastLanesWriteGlobalState(const std::string &path) : file_path(path), num_row_groups(0) {
+	explicit FastLanesWriteGlobalState(const std::string& path)
+	    : file_path(path)
+	    , num_row_groups(0) {
 	}
 
-	mutex combine_lock;
+	mutex                            combine_lock;
 	unique_ptr<ColumnDataCollection> combine_buffer;
 
-	fastlanes::Connection conn;
+	fastlanes::Connection                  conn;
 	std::unique_ptr<fastlanes::FileWriter> writer;
-	const std::filesystem::path file_path;
+	const std::filesystem::path            file_path;
 	//! Total number of row groups written.
-	idx_t num_row_groups;
+	idx_t              num_row_groups;
 	std::atomic<idx_t> next_row_group;
 };
 
@@ -58,25 +60,35 @@ struct FastLanesWriteBatchData final : PreparedBatchData {
 };
 
 struct FastLanesFileWriter {
-	static unique_ptr<LocalFunctionData> InitLocal(ExecutionContext &context, FunctionData &bind_data_p);
-	static void Sink(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &global_state_p,
-	                 LocalFunctionData &local_state_p, DataChunk &input);
-	static void Combine(ExecutionContext &context, FunctionData &bind_data_p, GlobalFunctionData &global_state_p,
-	                    LocalFunctionData &local_state_p);
-	static bool RotateFiles(FunctionData &bind_data_p, const optional_idx &file_size_bytes);
-	static bool RotateNextFile(GlobalFunctionData &global_state_p, FunctionData &bind_data_p,
-	                           const optional_idx &file_size_bytes);
-	static unique_ptr<FunctionData> Bind(ClientContext &context, CopyFunctionBindInput &input,
-	                                     const vector<string> &names, const vector<LogicalType> &sql_types);
-	static unique_ptr<GlobalFunctionData> InitGlobal(ClientContext &context, FunctionData &bind_data_p,
-	                                                 const string &file_path);
-	static CopyFunctionExecutionMode GetExecutionMode(bool preserve_insertion_order, bool supports_batch_index);
-	static idx_t GetDesiredBatchsize(ClientContext &context, FunctionData &bind_data_p);
-	static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext &context, FunctionData &bind_data_p,
-	                                                  GlobalFunctionData &global_state_p,
+	static unique_ptr<LocalFunctionData> InitLocal(ExecutionContext& context, FunctionData& bind_data_p);
+	static void                          Sink(ExecutionContext&   context,
+	                                          FunctionData&       bind_data_p,
+	                                          GlobalFunctionData& global_state_p,
+	                                          LocalFunctionData&  local_state_p,
+	                                          DataChunk&          input);
+	static void                          Combine(ExecutionContext&   context,
+	                                             FunctionData&       bind_data_p,
+	                                             GlobalFunctionData& global_state_p,
+	                                             LocalFunctionData&  local_state_p);
+	static bool                          RotateFiles(FunctionData& bind_data_p, const optional_idx& file_size_bytes);
+	static bool
+	RotateNextFile(GlobalFunctionData& global_state_p, FunctionData& bind_data_p, const optional_idx& file_size_bytes);
+	static unique_ptr<FunctionData> Bind(ClientContext&             context,
+	                                     CopyFunctionBindInput&     input,
+	                                     const vector<string>&      names,
+	                                     const vector<LogicalType>& sql_types);
+	static unique_ptr<GlobalFunctionData>
+	InitGlobal(ClientContext& context, FunctionData& bind_data_p, const string& file_path);
+	static CopyFunctionExecutionMode     GetExecutionMode(bool preserve_insertion_order, bool supports_batch_index);
+	static idx_t                         GetDesiredBatchsize(ClientContext& context, FunctionData& bind_data_p);
+	static unique_ptr<PreparedBatchData> PrepareBatch(ClientContext&                   context,
+	                                                  FunctionData&                    bind_data_p,
+	                                                  GlobalFunctionData&              global_state_p,
 	                                                  unique_ptr<ColumnDataCollection> collection);
-	static void FlushBatch(ClientContext &context, FunctionData &bind_data_p, GlobalFunctionData &global_state_p,
-	                       PreparedBatchData &batch_p);
-	static void Finalize(ClientContext &context, FunctionData &bind_data_p, GlobalFunctionData &global_state_p);
+	static void                          FlushBatch(ClientContext&      context,
+	                                                FunctionData&       bind_data_p,
+	                                                GlobalFunctionData& global_state_p,
+	                                                PreparedBatchData&  batch_p);
+	static void Finalize(ClientContext& context, FunctionData& bind_data_p, GlobalFunctionData& global_state_p);
 };
 } // namespace duckdb
