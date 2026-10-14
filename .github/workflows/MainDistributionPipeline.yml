@@ -40,7 +40,7 @@ jobs:
       CC: ${{ matrix.cc || 'clang' }}
       CXX: ${{ matrix.cxx || 'clang++' }}
       GEN: ninja
-      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ startsWith(matrix.os, 'macos-') && 2 || 4 }}
       DUCKDB_PLATFORM: ${{ matrix.platform }}
       EXT_FLAGS: -DFLS_BUILD_STANDALONE_TESTS=ON
     defaults:
@@ -80,11 +80,14 @@ jobs:
               make test
               build/release/_deps/fls_repo-build/test/standalone/fastlanes_integration_test
             '
-      - name: Build and test (macOS / Windows)
+      - name: Build (macOS / Windows)
         if: runner.os != 'Linux'
         run: |
           clang --version
           make release
+      - name: Test (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: |
           make test
           build/release/_deps/fls_repo-build/test/standalone/fastlanes_integration_test
       - uses: actions/upload-artifact@v4
