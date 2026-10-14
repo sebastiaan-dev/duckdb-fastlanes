@@ -44,7 +44,7 @@ jobs:
       DUCKDB_PLATFORM: ${{ matrix.platform }}
       EXT_FLAGS: >-
         -DFLS_BUILD_STANDALONE_TESTS=ON
-        ${{ matrix.platform == 'windows_amd64' && '-DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG' || '' }}
+        ${{ matrix.platform == 'windows_amd64' && '-DCMAKE_EXE_LINKER_FLAGS=-DEBUG -DCMAKE_SHARED_LINKER_FLAGS=-DEBUG' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
     defaults:
