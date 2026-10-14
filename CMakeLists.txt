@@ -71,7 +71,8 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 set(FLS_PATCH_SIGNATURE "")
 foreach(patch_file cmake/patch_fastlanes.cmake patches/fastlanes-build.patch
                    patches/fastlanes-branch-consolidation.patch patches/fastlanes-ci.patch
-                   patches/fastlanes-native-reader.patch patches/fastlanes-portability.patch)
+                   patches/fastlanes-native-reader.patch patches/fastlanes-portability.patch
+                   patches/fastlanes-operand-safety.patch)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}")
     file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}" patch_hash)
     string(APPEND FLS_PATCH_SIGNATURE "${patch_hash}")
