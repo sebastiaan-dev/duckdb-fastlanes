@@ -46,6 +46,10 @@ explicitly with Clang. Linux builds run in manylinux 2.28 containers; the generi
 DuckDB distribution workflow selects incompatible GCC/MSVC toolchains for this
 library. Release-tag metadata is verified before building. Formatting uses
 clang-format 11 and static analysis uses clang-tidy 18; neither check is disabled.
+On Windows/Clang, `cmake/patch_duckdb.cmake` also removes `DUCKDB_API` from two
+**deleted** DuckDB 1.5.6 overloads: they have no exported symbols, and Clang
+rejects the `dllexport` annotation. This idempotent source-only fix leaves the
+DuckDB submodule revision and runtime ABI unchanged.
 
 Outputs:
 
