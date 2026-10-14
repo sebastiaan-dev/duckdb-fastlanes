@@ -47,16 +47,24 @@ message(STATUS "C++: ${CMAKE_CXX_COMPILER} (ID=${CMAKE_CXX_COMPILER_ID})")
 
 #-----------------------------------------------------------------------------------------------------------------------
 include(FetchContent)
+if (POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif ()
 option(FLS_EXTENSION_BUILD_EXAMPLES "Build Examples Option" OFF)
 #### TODO: enable
 option(FLS_ENABLE_CLANG_TIDY "Enable clang_tidy on all targets" OFF)
 
 add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
+# The extension relies on the writer, projection, table-API and positional-I/O
+# patches in this revision, not vanilla cwida/FastLanes. Override locally with
+# FETCHCONTENT_SOURCE_DIR_FLS_REPO (or FASTLANES_SOURCE_DIR via make).
 FetchContent_Declare(
         fls_repo
-        GIT_REPOSITORY https://github.com/sebastiaan-dev/fastlanes-patched
-        GIT_TAG dev
+        URL https://codeload.github.com/sebastiaan-dev/fastlanes-patched/tar.gz/7f91afdbd916d24ab5b39a990fbdf7d9157c0f69
+        URL_HASH SHA256=5cc986dab44d4a2d2b1fd8fd2e32645cd6cc1e9e03e950b1cb1615ee5415d5de
+        PATCH_COMMAND ${CMAKE_COMMAND} -DFLS_SOURCE_DIR=<SOURCE_DIR>
+                      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_fastlanes.cmake
 )
 
 FetchContent_MakeAvailable(fls_repo)

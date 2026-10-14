@@ -48,7 +48,7 @@ bool FastLanesMultiFileInfo::ParseOption(ClientContext&         context,
 void FastLanesMultiFileInfo::GetBindInfo(const TableFunctionData& bind_data_p, BindInfo& info) {
 	// NOTE: This function is implemented, but it has no effect on the rest of the system, we keep it nonetheless in
 	// case of a patch down the line.
-	auto& bind_data = bind_data_p.Cast<FastLanesFileReaderOptions>();
+	const auto& bind_data = *bind_data_p.Cast<FastLanesReadBindData>().options;
 
 	info.InsertOption("file_row_number", Value::BOOLEAN(bind_data.file_row_number));
 	info.InsertOption("explicit_cardinality", Value::UBIGINT(bind_data.explicit_cardinality));

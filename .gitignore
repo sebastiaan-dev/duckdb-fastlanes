@@ -16,6 +16,7 @@ vcpkg_installed/
 .envrc.*
 
 .ccache
+.cache/
 
 temp/
 benchmark/data/

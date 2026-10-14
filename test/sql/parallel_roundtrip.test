@@ -1,0 +1,53 @@
+# name: test/sql/parallel_roundtrip.test
+# description: Parallel COPY and scanning with boolean bitmaps and reusable string dictionaries
+# group: [sql]
+
+require fastlanes
+
+statement ok
+SET threads=4;
+
+statement ok
+CREATE TABLE original AS
+SELECT i::INTEGER AS id, (i % 3 = 0) AS flag, true AS always_true, false AS always_false,
+       CASE i % 4 WHEN 0 THEN '' WHEN 1 THEN 'a' WHEN 2 THEN 'medium string'
+       ELSE 'a longer repeated dictionary value' END AS label
+FROM range(200003) t(i);
+
+statement ok
+COPY original TO '__TEST_DIR__/parallel.fls' (FORMAT fls, ROW_GROUP_SIZE 65536);
+
+statement ok
+CREATE TABLE restored AS SELECT * FROM read_fls('__TEST_DIR__/parallel.fls');
+
+query I
+SELECT count(*) FROM ((SELECT * FROM original EXCEPT ALL SELECT * FROM restored)
+UNION ALL (SELECT * FROM restored EXCEPT ALL SELECT * FROM original));
+----
+0
+
+query I
+SELECT count(*) FROM read_fls('__TEST_DIR__/parallel.fls') WHERE flag;
+----
+66668
+
+query TI
+SELECT label, count(*) FROM read_fls('__TEST_DIR__/parallel.fls') GROUP BY label ORDER BY label;
+----
+(empty)	50001
+a	50001
+a longer repeated dictionary value	50000
+medium string	50001
+
+# Exercise the unordered parallel writer, not only the ordered batch writer.
+statement ok
+SET preserve_insertion_order=false;
+
+statement ok
+COPY original TO '__TEST_DIR__/unordered.fls' (FORMAT fls, ROW_GROUP_SIZE 65536);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM original EXCEPT ALL SELECT * FROM read_fls('__TEST_DIR__/unordered.fls'))
+UNION ALL (SELECT * FROM read_fls('__TEST_DIR__/unordered.fls') EXCEPT ALL SELECT * FROM original));
+----
+0

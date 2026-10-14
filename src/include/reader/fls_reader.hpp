@@ -37,7 +37,7 @@ public:
 	bool                       TryInitializeScan(ClientContext&            context,
 	                                             GlobalTableFunctionState& gstate,
 	                                             LocalTableFunctionState&  lstate) override;
-	void                       Scan(ClientContext&            context,
+	AsyncResult                Scan(ClientContext&            context,
 	                                GlobalTableFunctionState& global_state_p,
 	                                LocalTableFunctionState&  local_state_p,
 	                                DataChunk&                chunk) override;
@@ -91,8 +91,8 @@ private:
 	bool IsFileRowNumberColumn(column_t column_id) const;
 
 private:
-	size_t                    total_vectors;
-	size_t                    total_tuples;
+	size_t                    total_vectors = 0;
+	size_t                    total_tuples = 0;
 	unique_ptr<TableMetadata> table_metadata;
 	atomic<idx_t>             vectors_read;
 	RowGroupStatistics        rowgroup_statistics;
