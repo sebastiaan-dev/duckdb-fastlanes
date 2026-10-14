@@ -4,6 +4,9 @@
 
 require fastlanes
 
+# Log each query before executing it, including when a worker crashes.
+mode debug
+
 statement ok
 SET threads=4;
 

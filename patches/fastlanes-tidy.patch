@@ -1,0 +1,63 @@
+diff --git a/src/expression/interpreter.cpp b/src/expression/interpreter.cpp
+index a62ecdc..e0d9396 100644
+--- a/src/expression/interpreter.cpp
++++ b/src/expression/interpreter.cpp
+@@ -43,7 +43,7 @@ namespace fastlanes {
+ static n_t LastOperandIndex(const ColumnView& column_view) {
+ 	// FlatBuffers omits empty vectors; nullary codecs such as ALP have no operands.
+ 	const auto* operands = column_view.column_descriptor.encoding_rpn()->operand_tokens();
+-	return operands && operands->size() != 0 ? operands->size() - 1 : 0;
++	return operands && !operands->empty() ? operands->size() - 1 : 0;
+ }
+ /*--------------------------------------------------------------------------------------------------------------------*\
+  * make_enc_uncompressed_expr
+diff --git a/src/flatbuffers/flatbuffers.cpp b/src/flatbuffers/flatbuffers.cpp
+index 312059c..28ca47b 100644
+--- a/src/flatbuffers/flatbuffers.cpp
++++ b/src/flatbuffers/flatbuffers.cpp
+@@ -8,6 +8,7 @@
+ #include "fls/common/alias.hpp"
+ #include "fls/footer/table_descriptor_generated.h"
+ #include "fls/io/io.hpp"
++#include <cstddef>
+ 
+ namespace fastlanes {
+ 
+diff --git a/src/include/fls/common/assert.hpp b/src/include/fls/common/assert.hpp
+index 49b2d6a..57ba9fb 100644
+--- a/src/include/fls/common/assert.hpp
++++ b/src/include/fls/common/assert.hpp
+@@ -56,7 +56,7 @@
+ // ── FlatBuffers helpers ──────────────────────────────────────────────────────
+ #define FLS_ASSERT_FB_PTR(PTR)                  FLS_ASSERT((PTR) != nullptr, " ", fastlanes::Assert::NULL_POINTER)
+ #define FLS_ASSERT_FB_NOT_EMPTY(PTR)                                                                                   \
+-	FLS_ASSERT(((PTR) != nullptr) && ((PTR)->size() > 0), " ", fastlanes::Assert::EMPTY_VECTOR)
++	FLS_ASSERT(((PTR) != nullptr) && (!(PTR)->empty()), " ", fastlanes::Assert::EMPTY_VECTOR)
+ 
+ #define FLS_ASSERT_FB_IDX_IN_RANGE(PTR, IDX)                                                                           \
+ 	FLS_ASSERT(                                                                                                        \
+diff --git a/src/reader/column_view.cpp b/src/reader/column_view.cpp
+index 129ec9c..f2a91fa 100644
+--- a/src/reader/column_view.cpp
++++ b/src/reader/column_view.cpp
+@@ -11,6 +11,8 @@
+ #include "fls/std/span.hpp"
+ #include <cstddef> // for std::byte
+ #include <cstdint> // for std::uint32_t
++#include <memory>
++#include <utility>
+ 
+ namespace fastlanes {
+ 
+diff --git a/src/reader/json_reader.cpp b/src/reader/json_reader.cpp
+index f94925c..dbf56cd 100644
+--- a/src/reader/json_reader.cpp
++++ b/src/reader/json_reader.cpp
+@@ -4,6 +4,7 @@
+ // src/reader/json_reader.cpp
+ // ────────────────────────────────────────────────────────
+ #include "fls/reader/json_reader.hpp"
++#include "fls/cfg/cfg.hpp"
+ #include "fls/common/alias.hpp"
+ #include "fls/common/common.hpp"
+ #include "fls/connection.hpp"

@@ -10,8 +10,9 @@
   [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch),
   [`patches/fastlanes-ci.patch`](../patches/fastlanes-ci.patch),
   [`patches/fastlanes-native-reader.patch`](../patches/fastlanes-native-reader.patch),
-  [`patches/fastlanes-portability.patch`](../patches/fastlanes-portability.patch), and
-  [`patches/fastlanes-operand-safety.patch`](../patches/fastlanes-operand-safety.patch).
+  [`patches/fastlanes-portability.patch`](../patches/fastlanes-portability.patch),
+  [`patches/fastlanes-operand-safety.patch`](../patches/fastlanes-operand-safety.patch), and
+  [`patches/fastlanes-tidy.patch`](../patches/fastlanes-tidy.patch).
 
 Use Clang (13 or newer), CMake (3.22 or newer), Ninja, Git and Python 3.
 The pinned FastLanes version requires C++20 and Clang; GCC is not supported by
@@ -43,7 +44,8 @@ codecs without losing DATE/TIMESTAMP/DECIMAL metadata, and supports Windows CRT
 descriptors and clang-cl. Windows serializes each 64-bit seek/read
 sequence per file; POSIX keeps concurrent `pread` calls. The operand-safety patch
 handles omitted FlatBuffers operand vectors, uses secure Windows descriptor
-opening, and adds native ALP/ALP-RD round-trip checks.
+opening, and adds native ALP/ALP-RD round-trip checks. The tidy patch supplies
+remaining direct includes and consistent empty-vector checks in Debug builds.
 
 CI builds and tests Linux x86-64/arm64, macOS x86-64/arm64, and Windows x86-64
 explicitly with Clang. Linux builds run in manylinux 2.28 containers; the generic
@@ -129,8 +131,11 @@ and ordered/unordered parallel COPY over multiple row groups.
 
 Validation on macOS arm64:
 
-- Full Release build and all **175 assertions in 4 test cases** pass with the
-  paired FastLanes worktree and independently with the downloaded/patched source.
+- The downloaded/patched Release build passes **182 assertions in 5 SQL cases**
+  plus **11 standalone native cases**, including floating-point dictionaries.
+  The paired FastLanes worktree also passed the original 175-assertion baseline.
+- The paired native shared-library build passes **261 CTest cases**, including
+  its standalone suite, with sanitizer-enabled native test executables.
 - The SQL regressions passed 20 consecutive runs after the multi-file state fix.
 - Loading into the official DuckDB 1.5.6 CLI succeeds; a 200,003-row parallel
   round trip and BOOLEAN filter also pass.

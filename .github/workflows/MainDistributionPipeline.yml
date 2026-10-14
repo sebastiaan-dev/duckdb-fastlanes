@@ -42,7 +42,9 @@ jobs:
       GEN: ninja
       CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.platform == 'osx_arm64' && 2 || 4 }}
       DUCKDB_PLATFORM: ${{ matrix.platform }}
-      EXT_FLAGS: -DFLS_BUILD_STANDALONE_TESTS=ON
+      EXT_FLAGS: >-
+        -DFLS_BUILD_STANDALONE_TESTS=ON
+        ${{ matrix.platform == 'windows_amd64' && '-DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG' || '' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
     defaults:
@@ -65,7 +67,7 @@ jobs:
         if: runner.os == 'Windows'
       - name: Cache macOS compiler outputs
         if: runner.os == 'macOS'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ matrix.platform }}-${{ github.sha }}
@@ -100,8 +102,23 @@ jobs:
       - name: Test (macOS / Windows)
         if: runner.os != 'Linux'
         run: |
-          make test
           build/release/_deps/fls_repo-build/test/standalone/fastlanes_integration_test
+          make test
+      - name: Diagnose Windows test crashes
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "$env:GITHUB_WORKSPACE/build/release/test/unittest.exe"
+          $lldb = "$env:ProgramFiles/LLVM/bin/lldb.exe"
+          if ((Test-Path $exe) -and (Test-Path $lldb)) {
+            & $lldb --batch -o run -o "thread backtrace all" -- $exe "test/sql/parallel_roundtrip.test"
+          }
+      - name: Save macOS compiler outputs
+        if: always() && runner.os == 'macOS'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ matrix.platform }}-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: fastlanes-v1.5.6-extension-${{ matrix.platform }}

@@ -43,8 +43,29 @@ struct KernelTraits<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> {
 		case PhysicalType::INT64:
 			KeyCopy<PASS, int64_t>(col, op);
 			break;
+		case PhysicalType::BOOL:
+			KeyCopy<PASS, bool>(col, op);
+			break;
+		case PhysicalType::UINT8:
+			KeyCopy<PASS, uint8_t>(col, op);
+			break;
+		case PhysicalType::UINT16:
+			KeyCopy<PASS, uint16_t>(col, op);
+			break;
+		case PhysicalType::UINT32:
+			KeyCopy<PASS, uint32_t>(col, op);
+			break;
+		case PhysicalType::UINT64:
+			KeyCopy<PASS, uint64_t>(col, op);
+			break;
+		case PhysicalType::FLOAT:
+			KeyCopy<PASS, float>(col, op);
+			break;
+		case PhysicalType::DOUBLE:
+			KeyCopy<PASS, double>(col, op);
+			break;
 		default:
-			throw std::runtime_error("Unsupported DECIMAL physical type");
+			throw std::runtime_error("Unsupported dictionary output physical type");
 		}
 	}
 };
