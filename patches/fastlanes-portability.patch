@@ -1,0 +1,726 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 59dae6a..1775bba 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -99,9 +99,16 @@ if (FLAGS)
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FLAGS}")
+ endif ()
+ 
++# clang-cl interprets -Wall as MSVC /Wall (equivalent to -Weverything).
++# Forward the GNU-style warning group explicitly instead, preserving our normal
++# warning policy without enabling C++98 compatibility diagnostics in C++20 code.
++set(FLS_WALL "-Wall")
++if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
++    set(FLS_WALL "/clang:-Wall")
++endif ()
+ # Flags for warnings and errors:
+-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Winconsistent-missing-override -Wshadow -Wconversion -Wnon-virtual-dtor -Wunused -Wpedantic -Woverloaded-virtual -Wshorten-64-to-32")
+-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Werror -Wshadow -Wconversion")
++set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${FLS_WALL} -Werror -Winconsistent-missing-override -Wshadow -Wconversion -Wnon-virtual-dtor -Wunused -Wpedantic -Woverloaded-virtual -Wshorten-64-to-32")
++set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${FLS_WALL} -Werror -Wshadow -Wconversion")
+ 
+ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+     message("---------------------------------------------------------------------------------------------------------")
+@@ -177,10 +184,18 @@ if (FLS_BUILD_TESTING OR FLS_BUILD_CUDA OR FLS_ENABLE_FSST_TESTING_AND_BENCHMARK
+ 
+     enable_testing()
+ 
++    # GoogleTest 1.15's char8_t printer intentionally converts a code unit to
++    # char32_t; recent Clang diagnoses that conversion. Keep the exception
++    # confined to this third-party library, not FastLanes or its tests.
++    check_cxx_compiler_flag("-Wcharacter-conversion" FLS_HAS_CHARACTER_CONVERSION_WARNING)
++
+     # Silence clang-tidy warnings from googletest (we don't want to lint third-party code)
+     foreach (_t gtest gtest_main gmock gmock_main)
+         if (TARGET ${_t})
+             set_target_properties(${_t} PROPERTIES CXX_CLANG_TIDY "")
++            if (FLS_HAS_CHARACTER_CONVERSION_WARNING)
++                target_compile_options(${_t} PRIVATE -Wno-error=character-conversion)
++            endif ()
+         endif ()
+     endforeach ()
+ 
+diff --git a/src/expression/fsst12_expression.cpp b/src/expression/fsst12_expression.cpp
+index f42e7e6..09c8edd 100644
+--- a/src/expression/fsst12_expression.cpp
++++ b/src/expression/fsst12_expression.cpp
+@@ -8,6 +8,7 @@
+ #include "fls/common/alias.hpp"
+ #include "fls/common/assert.hpp"
+ #include "fls/common/common.hpp"
++#include "fls/common/owned_span.hpp"
+ #include "fls/cor/prm/fsst12/fsst12.h"
+ #include "fls/expression/decoding_operator.hpp"
+ #include "fls/expression/interpreter.hpp"
+@@ -20,6 +21,7 @@
+ #include "fls/std/variant.hpp"
+ #include "fls/table/rowgroup.hpp"
+ #include "fls_gen/untranspose/untranspose.hpp"
++#include <cstddef>
+ #include <cstdint>
+ #include <utility>
+ #include <variant> // for std::monostate
+diff --git a/src/expression/fsst_expression.cpp b/src/expression/fsst_expression.cpp
+index 258dc9b..4217082 100644
+--- a/src/expression/fsst_expression.cpp
++++ b/src/expression/fsst_expression.cpp
+@@ -8,6 +8,7 @@
+ #include "fls/common/alias.hpp"
+ #include "fls/common/assert.hpp"
+ #include "fls/common/common.hpp"
++#include "fls/common/owned_span.hpp"
+ #include "fls/cor/prm/fsst/fsst.h"
+ #include "fls/expression/decoding_operator.hpp"
+ #include "fls/expression/interpreter.hpp"
+@@ -20,6 +21,7 @@
+ #include "fls/std/variant.hpp"
+ #include "fls/table/rowgroup.hpp"
+ #include "fls_gen/untranspose/untranspose.hpp"
++#include <cstddef>
+ #include <cstdint>
+ #include <utility> // for std::move
+ #include <variant> // for std::monostate
+diff --git a/src/include/fls/io/file.hpp b/src/include/fls/io/file.hpp
+index 94891dc..02e06c7 100644
+--- a/src/include/fls/io/file.hpp
++++ b/src/include/fls/io/file.hpp
+@@ -118,7 +118,7 @@ private:
+ 
+ class File {
+ public:
+-	explicit File(const path& path);
++	explicit File(path path);
+ 	~File();
+ 
+ 	File(const File&)            = delete;
+@@ -148,7 +148,7 @@ public:
+ 
+ private:
+ 	void EnsureReadOpen() const;
+-	void ReadInternal(uint8_t* dst, n_t size, off_t offset = 0) const;
++	void ReadInternal(uint8_t* dst, n_t size, n_t offset = 0) const;
+ 
+ private:
+ 	path              m_path;
+@@ -158,6 +158,10 @@ private:
+ 	mutable std::once_flag m_read_once;
+ 	mutable int            m_fd {-1};
+ 	mutable n_t            m_file_size {0};
++#if defined(_WIN32)
++	// The CRT has no pread: serialize each seek/read sequence instead.
++	mutable std::mutex m_read_mutex;
++#endif
+ };
+ 
+ struct ReadEvent {
+diff --git a/src/include/fls/std/filesystem.hpp b/src/include/fls/std/filesystem.hpp
+index b1be4c7..a8f17b9 100644
+--- a/src/include/fls/std/filesystem.hpp
++++ b/src/include/fls/std/filesystem.hpp
+@@ -6,6 +6,7 @@
+ #ifndef FLS_STD_FILESYSTEM_HPP
+ #define FLS_STD_FILESYSTEM_HPP
+ 
++#include <cstdint>
+ #include <filesystem>
+ #include <fstream>
+ 
+@@ -34,7 +35,7 @@ public:
+ 	static void check_if_dir_exists(const path& dir_path);
+ 	static void check_if_file_exists(const path& path);
+ 	/// read file size
+-	static off_t read_file_size(int fd);
++	static int64_t read_file_size(int fd);
+ };
+ 
+ } // namespace fastlanes
+diff --git a/src/io/file.cpp b/src/io/file.cpp
+index b8c160e..bbd7063 100644
+--- a/src/io/file.cpp
++++ b/src/io/file.cpp
+@@ -5,27 +5,34 @@
+ // ────────────────────────────────────────────────────────
+ #include "fls/io/file.hpp"
+ #include "fls/common/alias.hpp"
+-#include "fls/common/assert.hpp"
+ #include "fls/cor/lyt/buf.hpp"
+ #include "fls/std/filesystem.hpp"
+ #include "fls/std/string.hpp"
+ #include <cerrno>
+-#include <cstdint>    // for int64_t
+-#include <filesystem> // for std::filesystem::file_size, std::filesystem::exists
+-#include <fstream>    // for std::ifstream, std::ofstream
+-#include <ios>        // for std::ios, std::streamoff, std::streamsize
+-#include <memory>     // for std::make_unique
++#include <cstdint> // for int64_t
++#include <fstream> // for std::ifstream, std::ofstream
++#include <ios>     // for std::ios, std::streamoff, std::streamsize
++#include <memory>  // for std::make_unique
++#include <mutex>
+ #include <sstream>
+ #include <stdexcept> // for std::runtime_error
+ #include <system_error>
+-
+-// POSIX
++#include <utility>
++
++#if defined(_WIN32)
++#include <algorithm>
++#include <cstdio>
++#include <io.h>
++#include <limits>
++#else
++#include <sys/types.h>
+ #include <unistd.h>
++#endif
+ 
+ namespace fastlanes {
+ 
+-File::File(const path& p)
+-    : m_path(p) {
++File::File(path p)
++    : m_path(std::move(p)) {
+ }
+ 
+ void File::EnsureReadOpen() const {
+@@ -46,7 +53,7 @@ File::~File() {
+ 		FileSystem::close(*m_of_stream);
+ 	}
+ 	if (m_fd >= 0) {
+-		::close(m_fd);
++		FileSystem::close(m_fd);
+ 	}
+ }
+ 
+@@ -101,7 +108,7 @@ void File::ReadRange(const Buf& buf, const n_t offset, const n_t size) {
+ 	}
+ 
+ 	uint8_t* dst = buf.mutable_data();
+-	ReadInternal(dst, size, static_cast<off_t>(offset));
++	ReadInternal(dst, size, offset);
+ }
+ 
+ n_t File::Size() const {
+@@ -109,15 +116,26 @@ n_t File::Size() const {
+ 	return m_file_size;
+ }
+ 
+-void File::ReadInternal(uint8_t* dst, const n_t size, const off_t offset) const {
++void File::ReadInternal(uint8_t* dst, const n_t size, const n_t offset) const {
++#if defined(_WIN32)
++	const std::lock_guard<std::mutex> lock(m_read_mutex);
++	if (::_lseeki64(m_fd, static_cast<int64_t>(offset), SEEK_SET) < 0) {
++		throw std::system_error(errno, std::generic_category(), "seek: " + m_path.string());
++	}
++#endif
+ 	n_t done = 0;
+ 	while (done < size) {
+-		const ssize_t n_bytes = ::pread(m_fd, dst + done, size - done, offset + static_cast<off_t>(done));
++#if defined(_WIN32)
++		const auto count   = static_cast<unsigned int>(std::min<n_t>(size - done, std::numeric_limits<int>::max()));
++		const int  n_bytes = ::_read(m_fd, dst + done, count);
++#else
++		const ssize_t n_bytes = ::pread(m_fd, dst + done, size - done, static_cast<off_t>(offset + done));
++#endif
+ 		if (n_bytes < 0 && errno == EINTR) {
+ 			continue;
+ 		}
+ 		if (n_bytes < 0) {
+-			throw std::system_error(errno, std::generic_category(), "pread: " + m_path.string());
++			throw std::system_error(errno, std::generic_category(), "read: " + m_path.string());
+ 		}
+ 		if (n_bytes == 0) {
+ 			throw std::runtime_error("Unexpected end of file: " + m_path.string());
+@@ -153,4 +171,4 @@ void File::append(const path& dir_path, const string& dump) {
+ 	FileSystem::close(file);
+ }
+ 
+-} // namespace fastlanes
+\ No newline at end of file
++} // namespace fastlanes
+diff --git a/src/reader/rowgroup_reader.cpp b/src/reader/rowgroup_reader.cpp
+index 7457749..89be039 100644
+--- a/src/reader/rowgroup_reader.cpp
++++ b/src/reader/rowgroup_reader.cpp
+@@ -5,8 +5,8 @@
+ // ────────────────────────────────────────────────────────
+ #include "fls/reader/rowgroup_reader.hpp" //
+ #include "fls/common/alias.hpp"
+-#include "fls/connection.hpp"                     // for Connector (ptr only)
+-#include "fls/cor/lyt/buf.hpp"                    // for Buf
++#include "fls/connection.hpp"  // for Connector (ptr only)
++#include "fls/cor/lyt/buf.hpp" // for Buf
+ #include "fls/cor/lyt/buf_pool.hpp"
+ #include "fls/csv/csv.hpp"                        // for CSV
+ #include "fls/encoder/materializer.hpp"           //
+@@ -22,17 +22,20 @@
+ #include "fls/reader/rowgroup_view.hpp"
+ #include "fls/std/filesystem.hpp"
+ #include "fls/table/chunk.hpp" // for Chunk
+-#include <memory>              // for make_unique, uniqu...
++#include <cstddef>
++#include <memory> // for make_unique, uniqu...
+ #include <numeric>
+ #include <optional>
++#include <utility>
++#include <vector>
+ 
+ namespace fastlanes {
+ 
+-RowgroupReader::RowgroupReader(const io&                  io,
++RowgroupReader::RowgroupReader(const io&                 io,
+                                const RowgroupDescriptor& rowgroup_descriptor,
+-                               Connection&                connection,
+-                               const std::vector<idx_t>&  column_ids,
+-                               std::shared_ptr<BufPool>   buffer_pool)
++                               Connection&               connection,
++                               const std::vector<idx_t>& column_ids,
++                               std::shared_ptr<BufPool>  buffer_pool)
+     : m_connection(connection)
+     , m_rowgroup_descriptor(rowgroup_descriptor)
+     , m_buffer_pool(std::move(buffer_pool))
+@@ -211,8 +214,8 @@ RowgroupReader::RowgroupReader(const io&                  io,
+ 
+ 		for (const auto& col_idx : m_column_ids) {
+ 			const auto& cd         = m_rowgroup_descriptor.m_column_descriptors()->Get(col_idx);
+-			auto  col_size   = cd->total_size();
+-			auto  col_offset = m_rowgroup_descriptor.m_offset() + cd->column_offset();
++			auto        col_size   = cd->total_size();
++			auto        col_offset = m_rowgroup_descriptor.m_offset() + cd->column_offset();
+ 
+ 			auto buffer = m_buffer_pool ? m_buffer_pool->Acquire(col_size) : std::make_shared<Buf>(col_size);
+ 			IO::range_read(io, *buffer, col_offset, col_size);
+@@ -251,7 +254,7 @@ RowgroupReader::RowgroupReader(const io&                  io,
+ 		m_expressions.reserve(m_column_ids.size());
+ 		for (const auto& col_idx : m_column_ids) {
+ 			const auto& column_descriptor = m_rowgroup_descriptor.m_column_descriptors()->Get(col_idx);
+-			auto& column_view       = (*m_rowgroup_view)[col_idx];
++			auto&       column_view       = (*m_rowgroup_view)[col_idx];
+ 
+ 			InterpreterState state;
+ 			auto             physical_expr = make_decoding_expression(*column_descriptor, column_view, *this, state);
+@@ -261,10 +264,10 @@ RowgroupReader::RowgroupReader(const io&                  io,
+ 	}
+ }
+ 
+-RowgroupReader::RowgroupReader(const path&                file_path,
++RowgroupReader::RowgroupReader(const path&               file_path,
+                                const RowgroupDescriptor& rowgroup_descriptor,
+-                               Connection&                connection,
+-                               std::shared_ptr<BufPool>   buffer_pool)
++                               Connection&               connection,
++                               std::shared_ptr<BufPool>  buffer_pool)
+     : m_connection(connection)
+     , m_rowgroup_descriptor(rowgroup_descriptor)
+     , m_buffer_pool(std::move(buffer_pool)) {
+@@ -282,8 +285,8 @@ RowgroupReader::RowgroupReader(const path&                file_path,
+ 
+ 		for (const auto& col_idx : m_column_ids) {
+ 			const auto& cd         = m_rowgroup_descriptor.m_column_descriptors()->Get(col_idx);
+-			auto  col_size   = cd->total_size();
+-			auto  col_offset = m_rowgroup_descriptor.m_offset() + cd->column_offset();
++			auto        col_size   = cd->total_size();
++			auto        col_offset = m_rowgroup_descriptor.m_offset() + cd->column_offset();
+ 
+ 			auto buffer = m_buffer_pool ? m_buffer_pool->Acquire(col_size) : std::make_shared<Buf>(col_size);
+ 			IO::range_read(io, *buffer, col_offset, col_size);
+@@ -322,7 +325,7 @@ RowgroupReader::RowgroupReader(const path&                file_path,
+ 		m_expressions.reserve(m_column_ids.size());
+ 		for (const auto& col_idx : m_column_ids) {
+ 			const auto& column_descriptor = m_rowgroup_descriptor.m_column_descriptors()->Get(col_idx);
+-			auto& column_view       = (*m_rowgroup_view)[col_idx];
++			auto&       column_view       = (*m_rowgroup_view)[col_idx];
+ 
+ 			InterpreterState state;
+ 			auto             physical_expr = make_decoding_expression(*column_descriptor, column_view, *this, state);
+@@ -353,7 +356,7 @@ up<Rowgroup> RowgroupReader::materialize() {
+ 
+ 	// Construct Rowgroup from the native descriptor
+ 	// TODO: Capacity is not used
+-	auto rowgroup_up = std::make_unique<Rowgroup>(*rg_native, 0);
++	auto               rowgroup_up = std::make_unique<Rowgroup>(*rg_native, 0);
+ 	const Materializer materializer {*rowgroup_up};
+ 
+ 	const n_t n_vec = static_cast<n_t>(m_rowgroup_descriptor.m_n_vec());
+diff --git a/src/reader/rowgroup_view.cpp b/src/reader/rowgroup_view.cpp
+index c206824..bcb16ad 100644
+--- a/src/reader/rowgroup_view.cpp
++++ b/src/reader/rowgroup_view.cpp
+@@ -8,14 +8,14 @@
+ #include "fls/common/assert.hpp"
+ #include "fls/footer/rowgroup_descriptor_generated.h"
+ #include "fls/reader/column_view.hpp"
+-#include "fls/std/span.hpp"
+-#include <cstddef>  // for std::byte
++#include <memory>
+ #include <optional> // for std::optional
++#include <vector>
+ 
+ namespace fastlanes {
+ 
+ RowgroupView::RowgroupView(const std::vector<std::optional<ColumnBufferReference>>& cols_by_id,
+-                           const RowgroupDescriptor&                               footer) {
++                           const RowgroupDescriptor&                                footer) {
+ 	columns.resize(cols_by_id.size());
+ 
+ 	for (idx_t id = 0; id < static_cast<idx_t>(cols_by_id.size()); ++id) {
+diff --git a/src/reader/segment.cpp b/src/reader/segment.cpp
+index 54966fc..bc0285a 100644
+--- a/src/reader/segment.cpp
++++ b/src/reader/segment.cpp
+@@ -17,8 +17,10 @@
+ #include <cstddef> // for std::byte
+ #include <cstdint>
+ #include <limits> // for std::numeric_limits
++#include <memory>
+ #include <span>
+ #include <stdexcept>
++#include <utility>
+ #include <variant>
+ 
+ namespace fastlanes {
+@@ -236,10 +238,10 @@ template u08_pt* Segment::GetFixedSizeArray<u08_pt>(n_t length);
+ /*--------------------------------------------------------------------------------------------------------------------*\
+  * make_segment_view
+ \*--------------------------------------------------------------------------------------------------------------------*/
+-SegmentView make_segment_view(span<std::byte> column_span,
++SegmentView make_segment_view(span<std::byte>          column_span,
+                               const SegmentDescriptor& segment_descriptor,
+-                              uint64_t                  column_offset,
+-                              std::shared_ptr<void>     owner) {
++                              uint64_t                 column_offset,
++                              std::shared_ptr<void>    owner) {
+ 	const auto local_entry_offset = segment_descriptor.entrypoint_offset() - column_offset;
+ 	const auto local_data_offset  = segment_descriptor.data_offset() - column_offset;
+ 
+diff --git a/src/reader/table_reader.cpp b/src/reader/table_reader.cpp
+index 8bf4771..7522e50 100644
+--- a/src/reader/table_reader.cpp
++++ b/src/reader/table_reader.cpp
+@@ -4,18 +4,22 @@
+ // src/reader/table_reader.cpp
+ // ────────────────────────────────────────────────────────
+ #include "fls/reader/table_reader.hpp"
++#include "flatbuffers/base.h"
+ #include "fls/common/alias.hpp"
+-#include "fls/csv/csv.hpp"
+ #include "fls/cor/lyt/buf_pool.hpp"
++#include "fls/csv/csv.hpp"
+ #include "fls/encoder/materializer.hpp"
+ #include "fls/file/file_footer.hpp"
+ #include "fls/file/file_header.hpp"
+ #include "fls/footer/table_descriptor.hpp"
++#include "fls/io/file.hpp"
+ #include "fls/reader/rowgroup_reader.hpp"
+ #include "fls/std/filesystem.hpp"
+ #include "fls/std/string.hpp"
+ #include <filesystem> // std::filesystem::path, exists, is_directory, is_regular_file
+-#include <utility>    // std::move
++#include <memory>
++#include <utility> // std::move
++#include <vector>
+ 
+ namespace fastlanes {
+ 
+diff --git a/src/std/filesystem.cpp b/src/std/filesystem.cpp
+index 86a8a9a..9f3e00d 100644
+--- a/src/std/filesystem.cpp
++++ b/src/std/filesystem.cpp
+@@ -4,22 +4,19 @@
+ // src/std/filesystem.cpp
+ // ────────────────────────────────────────────────────────
+ #include "fls/std/filesystem.hpp"
+-#include "fls/common/assert.hpp"
+-#include <cerrno>     // errno
++#include <cerrno> // errno
++#include <cstdint>
++#include <fcntl.h>
+ #include <filesystem> // std::filesystem::path, exists, is_directory, is_regular_file
+ #include <fstream>
+ #include <ios>       // std::ios::binary
+ #include <stdexcept> // std::runtime_error
+ #include <sys/stat.h>
+-#include <system_error> // NEW – std::system_error / std::error_code
+-#include <unistd.h>     // for ::close
+-
+-#if defined(__APPLE__)
+-#include <sys/_types/_off_t.h>
+-#include <sys/fcntl.h>
+-#elif defined(__linux__)
+-#include <fcntl.h>
+-#include <sys/types.h> // off_t
++#include <system_error> // std::system_error / std::error_code
++#if defined(_WIN32)
++#include <io.h>
++#else
++#include <unistd.h>
+ #endif
+ 
+ namespace fastlanes {
+@@ -41,7 +38,11 @@ std::ifstream FileSystem::open_r(const path& file) {
+ }
+ 
+ int FileSystem::open_r_binary(const path& file) {
+-	const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
++#if defined(_WIN32)
++	const int fd = ::_wopen(file.c_str(), _O_RDONLY | _O_BINARY | _O_NOINHERIT);
++#else
++	const int   fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
++#endif
+ 	if (fd < 0) {
+ 		throw_last_error(file);
+ 	}
+@@ -85,9 +86,15 @@ void FileSystem::check_if_file_exists(const fs::path& file_path) {
+ 	}
+ }
+ 
+-off_t FileSystem::read_file_size(const int fd) {
++int64_t FileSystem::read_file_size(const int fd) {
++#if defined(_WIN32)
++	struct _stat64 st {};
++	const int      result = ::_fstat64(fd, &st);
++#else
+ 	struct stat st {};
+-	if (::fstat(fd, &st) != 0) {
++	const int   result = ::fstat(fd, &st);
++#endif
++	if (result != 0) {
+ 		// The caller owns fd, including on failure.
+ 		throw std::system_error(errno, std::generic_category(), "fstat");
+ 	}
+@@ -100,7 +107,11 @@ void FileSystem::close(STREAM& stream) {
+ }
+ 
+ void FileSystem::close(const int fd) {
++#if defined(_WIN32)
++	::_close(fd);
++#else
+ 	::close(fd);
++#endif
+ }
+ 
+ template void FileSystem::close(std::ifstream&);
+diff --git a/src/wizard/wizard.cpp b/src/wizard/wizard.cpp
+index a98cd34..af42b49 100644
+--- a/src/wizard/wizard.cpp
++++ b/src/wizard/wizard.cpp
+@@ -90,6 +90,9 @@ void init(vector<up<ColumnDescriptorT>>& column_descriptors) {
+ 		column_descriptor->max          = make_unique<BinaryValueT>();
+ 		column_descriptor->min          = make_unique<BinaryValueT>();
+ 		column_descriptor->encoding_rpn = make_unique<RPNT>();
++		// Statistics gathering descends into structs, so their child descriptors
++		// need the same initialized metadata as top-level columns.
++		init(column_descriptor->children);
+ 	}
+ }
+ 
+@@ -112,10 +115,13 @@ struct constant_visitor {
+ 				column_descriptor.encoding_rpn->operator_tokens.emplace_back(OperatorToken::EXP_CONSTANT_FLT);
+ 				break;
+ 			}
++			case DataType::DECIMAL:
++			case DataType::TIMESTAMP:
+ 			case DataType::INT64: {
+ 				column_descriptor.encoding_rpn->operator_tokens.emplace_back(OperatorToken::EXP_CONSTANT_I64);
+ 				break;
+ 			}
++			case DataType::DATE:
+ 			case DataType::INT32: {
+ 				column_descriptor.encoding_rpn->operator_tokens.emplace_back(OperatorToken::EXP_CONSTANT_I32);
+ 				break;
+@@ -190,6 +196,7 @@ struct null_visitor {
+ 				column_descriptor.encoding_rpn->operator_tokens.emplace_back(OperatorToken::EXP_NULL_I16);
+ 				break;
+ 			}
++			case DataType::DATE:
+ 			case DataType::INT32: {
+ 				column_descriptor.encoding_rpn->operator_tokens.emplace_back(OperatorToken::EXP_NULL_I32);
+ 				break;
+@@ -303,6 +310,9 @@ void equality_check(const rowgroup_pt& rowgroup, vector<up<ColumnDescriptorT>>&
+ 				switch (column_descriptor->data_type) {
+ 				case DataType::DOUBLE:
+ 				case DataType::FLS_STR:
++				case DataType::DECIMAL:
++				case DataType::TIMESTAMP:
++				case DataType::DATE:
+ 				case DataType::INT64:
+ 				case DataType::INT32:
+ 				case DataType::INT16:
+@@ -642,6 +652,8 @@ bool IsMap1t1(const col_pt& first_col, const col_pt& second_col) {
+ 
+ void PushExternalDictionaryEncoding(ColumnDescriptorT& second_column_descriptor, DataType common_data_type_for_index) {
+ 	switch (second_column_descriptor.data_type) {
++	case DataType::DECIMAL:
++	case DataType::TIMESTAMP:
+ 	case DataType::INT64: {
+ 		switch (common_data_type_for_index) {
+ 		case DataType::UINT32: {
+@@ -661,6 +673,7 @@ void PushExternalDictionaryEncoding(ColumnDescriptorT& second_column_descriptor,
+ 		}
+ 		break;
+ 	}
++	case DataType::DATE:
+ 	case DataType::INT32: {
+ 		switch (common_data_type_for_index) {
+ 		case DataType::UINT32: {
+diff --git a/src/writer/file_writer.cpp b/src/writer/file_writer.cpp
+index 3749aa9..2f8304c 100644
+--- a/src/writer/file_writer.cpp
++++ b/src/writer/file_writer.cpp
+@@ -1,18 +1,28 @@
++// ────────────────────────────────────────────────────────
++// |                      FastLanes                       |
++// ────────────────────────────────────────────────────────
++// src/writer/file_writer.cpp
++// ────────────────────────────────────────────────────────
+ #include "fls/writer/file_writer.hpp"
++#include "fls/common/alias.hpp"
++#include "fls/cor/lyt/buf.hpp"
+ #include "fls/file/file_footer.hpp"
+ #include "fls/file/file_header.hpp"
+ #include "fls/flatbuffers/flatbuffers.hpp"
+ #include "fls/footer/table_descriptor_generated.h"
+ #include "fls/info.hpp"
++#include "fls/io/file.hpp"
++#include "fls/io/io.hpp"
+ #include "fls/writer/rowgroup_writer.hpp"
+-#include <iostream>
++#include <mutex>
++#include <utility>
+ 
+ namespace fastlanes {
+ 
+ FileWriter::FileWriter(WriterOptions&& opts)
+     : options(std::move(opts)) {
+ 
+-    };
++      };
+ 
+ void FileWriter::Open() {
+ 	table_descriptor = make_unique<TableDescriptorT>();
+@@ -64,4 +74,4 @@ void FileWriter::FlushRowGroup(const Buf& buf, up<RowgroupDescriptorT>&& descrip
+ 	table_descriptor->m_rowgroup_descriptors.push_back(std::move(descriptor));
+ }
+ 
+-} // namespace fastlanes
+\ No newline at end of file
++} // namespace fastlanes
+diff --git a/src/writer/ingest.cpp b/src/writer/ingest.cpp
+index 652b366..7e21cbc 100644
+--- a/src/writer/ingest.cpp
++++ b/src/writer/ingest.cpp
+@@ -1,4 +1,23 @@
++// ────────────────────────────────────────────────────────
++// |                      FastLanes                       |
++// ────────────────────────────────────────────────────────
++// src/writer/ingest.cpp
++// ────────────────────────────────────────────────────────
+ #include "fls/writer/ingest.hpp"
++#include "fls/cfg/cfg.hpp"
++#include "fls/common/alias.hpp"
++#include "fls/expression/data_type.hpp"
++#include "fls/std/string.hpp"
++#include "fls/table/rowgroup.hpp"
++#include <cctype>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <exception>
++#include <limits>
++#include <span>
++#include <stdexcept>
++#include <string>
+ 
+ namespace fastlanes {
+ 
+@@ -106,4 +125,4 @@ void Ingest::FLSStringIngest(FLSStrColumn& fls_str_column, std::span<const str_p
+ 	}
+ }
+ 
+-} // namespace fastlanes
+\ No newline at end of file
++} // namespace fastlanes
+diff --git a/src/writer/rowgroup_writer.cpp b/src/writer/rowgroup_writer.cpp
+index c055778..de9965d 100644
+--- a/src/writer/rowgroup_writer.cpp
++++ b/src/writer/rowgroup_writer.cpp
+@@ -4,10 +4,19 @@
+ // src/writer/rowgroup_writer.cpp
+ // ────────────────────────────────────────────────────────
+ #include "fls/writer/rowgroup_writer.hpp"
++#include "fls/common/alias.hpp"
++#include "fls/common/common.hpp"
+ #include "fls/encoder/encoder.hpp"
++#include "fls/footer/column_descriptor_generated.h"
++#include "fls/footer/rowgroup_descriptor.hpp"
++#include "fls/std/variant.hpp"
++#include "fls/table/rowgroup.hpp"
+ #include "fls/wizard/wizard.hpp"
+ #include "fls/writer/column_write_view.hpp"
+ #include "fls/writer/file_writer.hpp"
++#include <memory>
++#include <utility>
++#include <vector>
+ 
+ namespace fastlanes {
+ 
+@@ -71,8 +80,7 @@ RowGroupWriter::RowGroupWriter(FileWriter& file_writer, Rowgroup& rowgroup)
+ 	}
+ }
+ 
+-RowGroupWriter::~RowGroupWriter() {
+-}
++RowGroupWriter::~RowGroupWriter() = default;
+ 
+ void RowGroupWriter::WriteColumn(const ColumnWriteView& view, const idx_t col_idx) {
+ 	WriteVector(view, col_idx);
+diff --git a/test/standalone/integration_test.cpp b/test/standalone/integration_test.cpp
+index 3223148..bd97fda 100644
+--- a/test/standalone/integration_test.cpp
++++ b/test/standalone/integration_test.cpp
+@@ -64,7 +64,7 @@ void WriteText(const fs::path& path, const std::string& text) {
+ }
+ 
+ void TestNewOutput(const fs::path& root) {
+-	const auto        path = root / "new.bin";
++	const auto        path = root / fs::path(u8"new-\u00e9.bin");
+ 	const std::string text = "new output";
+ 	{
+ 		File output(path); // Must not try to open a nonexistent output for reading.
+@@ -170,6 +170,26 @@ void TestNativeStringMaterialization(const fs::path& root, fastlanes::OperatorTo
+ 	Check(File::read(result) == csv, "Native FSST string materialization mismatch");
+ }
+ 
++void TestNativeStructMaterialization(const fs::path& root) {
++	using namespace fastlanes;
++	const auto dir = root / "struct";
++	fs::create_directory(dir);
++	WriteText(
++	    dir / "schema.json",
++	    R"({"columns":[{"name":"record","type":"struct","children":[{"name":"x","type":"BIGINT"},{"name":"y","type":"BIGINT"}]}]})");
++	std::string json;
++	for (int i = 0; i < 1024; ++i) {
++		json += "{\"record\":{\"x\":" + std::to_string(i) + ",\"y\":" + std::to_string(i + 1000000000) + "}}\n";
++	}
++	WriteText(dir / "data.jsonl", json);
++	Connection writer;
++	const auto output = dir / "output.fls";
++	writer.read_json(dir).to_fls(output);
++	Connection reader;
++	const auto decoded = reader.read_fls(output)->materialize();
++	Check((writer.get_table() == *decoded).is_equal, "Native struct table round trip mismatch");
++}
++
+ void TestWriterOptions(const fs::path& root, bool forced_pool, bool inline_footer) {
+ 	using namespace fastlanes;
+ 	const auto dir = root / (forced_pool ? "pool" : "schema");
+@@ -224,7 +244,8 @@ int main() {
+ 		TestWriterOptions(root.path, true, true);
+ 		TestNativeStringMaterialization(root.path, fastlanes::OperatorToken::EXP_FSST_DELTA);
+ 		TestNativeStringMaterialization(root.path, fastlanes::OperatorToken::EXP_FSST12_DELTA);
+-		std::cout << "All 8 standalone integration cases passed\n";
++		TestNativeStructMaterialization(root.path);
++		std::cout << "All 9 standalone integration cases passed\n";
+ 		return 0;
+ 	} catch (const std::exception& error) {
+ 		std::cerr << error.what() << '\n';

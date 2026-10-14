@@ -43,8 +43,29 @@ struct KernelTraits<fastlanes::dec_dict_opr<KEY_PT, INDEX_PT>> {
 		case PhysicalType::INT64:
 			KeyCopy<PASS, int64_t>(col, op);
 			break;
+		case PhysicalType::BOOL:
+			KeyCopy<PASS, bool>(col, op);
+			break;
+		case PhysicalType::UINT8:
+			KeyCopy<PASS, uint8_t>(col, op);
+			break;
+		case PhysicalType::UINT16:
+			KeyCopy<PASS, uint16_t>(col, op);
+			break;
+		case PhysicalType::UINT32:
+			KeyCopy<PASS, uint32_t>(col, op);
+			break;
+		case PhysicalType::UINT64:
+			KeyCopy<PASS, uint64_t>(col, op);
+			break;
+		case PhysicalType::FLOAT:
+			KeyCopy<PASS, float>(col, op);
+			break;
+		case PhysicalType::DOUBLE:
+			KeyCopy<PASS, double>(col, op);
+			break;
 		default:
-			throw std::runtime_error("Unsupported DECIMAL physical type");
+			throw std::runtime_error("Unsupported dictionary output physical type");
 		}
 	}
 };
@@ -57,21 +78,19 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 	                    const std::vector<FastLanesScanFilter*>*) {
 		auto& c = ctx.Emplace<FSSTDictColumnCtx>();
 
-		c.dict_size = op.dict_offsets_segment.data_span.size() / sizeof(fastlanes::ofs_t);
-		c.dict_vec  = make_uniq<Vector>(type, c.dict_size);
-		c.sel_vec   = make_uniq<SelectionVector>(2048);
+		c.dict_size      = op.dict_offsets_segment.data_span.size() / sizeof(fastlanes::ofs_t);
+		c.dictionary     = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
+		auto& dictionary = c.dictionary->data;
 
-		const auto  child_ptr = GetDataPtr<Pass::First, string_t>(*c.dict_vec);
+		const auto  child_ptr = GetDataPtr<Pass::First, string_t>(dictionary);
 		const auto* offsets   = op.dict_offsets_segment.data_span.data();
 		const auto* bytes     = op.Bytes();
 
 		fastlanes::ofs_t prev_end = 0;
 		for (fastlanes::n_t i {0}; i < c.dict_size; ++i) {
-			const auto cur  = detail::LoadValue<fastlanes::ofs_t>(offsets + i * sizeof(fastlanes::ofs_t));
-			const auto prev = cur - prev_end;
-
+			const auto cur = detail::LoadValue<fastlanes::ofs_t>(offsets + i * sizeof(fastlanes::ofs_t));
 			child_ptr[i] =
-			    StringVector::AddString(*c.dict_vec, reinterpret_cast<const char*>(bytes + prev), cur - prev);
+			    StringVector::AddString(dictionary, reinterpret_cast<const char*>(bytes + prev_end), cur - prev_end);
 			prev_end = cur;
 		}
 	}
@@ -82,21 +101,24 @@ struct KernelTraits<fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>> 
 	                   idx_t,
 	                   fastlanes::dec_dict_opr<fastlanes::fls_string_t, INDEX_PT>& op,
 	                   fastlanes::DataType&) {
-		const auto& c     = ctx.Expect<FSSTDictColumnCtx>();
-		auto        index = op.Index();
-		auto&       sel   = *c.sel_vec;
+		auto& c = ctx.Expect<FSSTDictColumnCtx>();
+		if constexpr (PASS == Pass::First) {
+			// Output chunks may retain their selection buffer after the next scan.
+			c.sel_vec = make_uniq<SelectionVector>(STANDARD_VECTOR_SIZE);
+		}
+		auto  index = op.Index();
+		auto& sel   = *c.sel_vec;
 
 		if constexpr (PASS == Pass::First) {
 			for (idx_t i = 0; i < 1024; ++i) {
 				sel.set_index(i, static_cast<sel_t>(index[i]));
 			}
-			col.Dictionary(*c.dict_vec, c.dict_size, sel, 1024);
-			DictionaryVector::SetDictionaryId(col, to_string(CastPointerToValue(c.dict_vec->GetBuffer().get())));
+			col.Dictionary(c.dictionary, sel);
 		} else {
 			for (idx_t i = 0; i < 1024; ++i) {
 				sel.set_index(i + 1024, static_cast<sel_t>(index[i]));
 			}
-			col.Dictionary(*c.dict_vec, c.dict_size, sel, 2048);
+			col.Dictionary(c.dictionary, sel);
 		}
 	}
 };

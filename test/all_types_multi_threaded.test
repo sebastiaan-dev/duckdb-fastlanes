@@ -1,6 +1,6 @@
-# name: test/sql/all_types_multi_threaded.test
+# name: test/all_types_multi_threaded.test
 # description: Test loading FSST
-# group: [sql]
+# group: [test]
 
 require fastlanes
 

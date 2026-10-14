@@ -72,8 +72,10 @@ static void DispatchNumericPhysicalType(PhysicalType physical_type, VISITOR&& vi
 	case PhysicalType::DOUBLE:
 		visitor.template operator()<double>();
 		break;
-	case PhysicalType::INTERVAL:
 	case PhysicalType::BOOL:
+		visitor.template operator()<bool>();
+		break;
+	case PhysicalType::INTERVAL:
 	case PhysicalType::INT128:
 	case PhysicalType::UINT128:
 	default:

@@ -23,13 +23,13 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	                    const std::vector<FastLanesScanFilter*>* scan_filters) {
 		auto& c = ctx.Emplace<FSSTDictColumnCtx>();
 
-		c.dict_size = op.fsst_offset_segment_view.data_span.size() / sizeof(fastlanes::ofs_t);
-		c.dict_vec  = make_uniq<Vector>(type, c.dict_size);
-		c.sel_vec   = make_uniq<SelectionVector>(2048);
+		c.dict_size      = op.fsst_offset_segment_view.data_span.size() / sizeof(fastlanes::ofs_t);
+		c.dictionary     = DictionaryVector::CreateReusableDictionary(type, c.dict_size);
+		auto& dictionary = c.dictionary->data;
 
-		auto& str_buffer = StringVector::GetStringBuffer(*c.dict_vec);
+		auto& str_buffer = StringVector::GetStringBuffer(dictionary);
 
-		const auto  child_ptr    = GetDataPtr<Pass::First, string_t>(*c.dict_vec);
+		const auto  child_ptr    = GetDataPtr<Pass::First, string_t>(dictionary);
 		const auto  offset_bytes = reinterpret_cast<const uint8_t*>(op.fsst_offset_segment_view.data_span.data());
 		const auto* in_byte_arr  = reinterpret_cast<uint8_t*>(op.fsst_bytes_segment_view.data);
 
@@ -53,9 +53,13 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 	template <Pass PASS>
 	static void
 	Decode(ColumnCtxHandle& ctx, Vector& col, idx_t, fastlanes::dec_fsst_dict_opr<INDEX_PT>& op, fastlanes::DataType&) {
-		const auto& c     = ctx.Expect<FSSTDictColumnCtx>();
-		auto        index = op.Index();
-		auto&       sel   = *c.sel_vec;
+		auto& c = ctx.Expect<FSSTDictColumnCtx>();
+		if constexpr (PASS == Pass::First) {
+			// Output chunks may retain their selection buffer after the next scan.
+			c.sel_vec = make_uniq<SelectionVector>(STANDARD_VECTOR_SIZE);
+		}
+		auto  index = op.Index();
+		auto& sel   = *c.sel_vec;
 
 		// TODO: To make this fast we need to know if there will be 2 passes or only one.
 		// Do we want to add a third function call to the Kernel API that does a potential finishing pass per vector?
@@ -68,13 +72,12 @@ struct KernelTraits<fastlanes::dec_fsst_dict_opr<INDEX_PT>> {
 			for (idx_t i = 0; i < 1024; ++i) {
 				sel.set_index(i, static_cast<sel_t>(index[i]));
 			}
-			col.Dictionary(*c.dict_vec, c.dict_size, sel, 1024);
-			DictionaryVector::SetDictionaryId(col, to_string(CastPointerToValue(c.dict_vec->GetBuffer().get())));
+			col.Dictionary(c.dictionary, sel);
 		} else {
 			for (idx_t i = 0; i < 1024; ++i) {
 				sel.set_index(i + 1024, static_cast<sel_t>(index[i]));
 			}
-			col.Dictionary(*c.dict_vec, c.dict_size, sel, 2048);
+			col.Dictionary(c.dictionary, sel);
 		}
 	}
 };

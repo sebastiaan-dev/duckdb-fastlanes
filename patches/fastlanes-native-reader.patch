@@ -1,0 +1,245 @@
+diff --git a/src/connection.cpp b/src/connection.cpp
+index 32cacf6..dcab412 100644
+--- a/src/connection.cpp
++++ b/src/connection.cpp
+@@ -112,8 +112,8 @@ Connection& Connection::to_fls(const path& file_path) {
+ 
+ 		row_group_writer->Finalize();
+ 		row_group_writer->Flush();
+-		// Prevent memory pressure build-up
+-		rowgroup_ptr.reset();
++		// This API writes the connection's table, but does not consume it.
++		// Callers may still inspect or compare get_table() after serialization.
+ 	}
+ 
+ 	writer->Close();
+diff --git a/src/encoder/encoder.cpp b/src/encoder/encoder.cpp
+index c045294..fe0d6b6 100644
+--- a/src/encoder/encoder.cpp
++++ b/src/encoder/encoder.cpp
+@@ -18,8 +18,8 @@
+ #include "fls/table/rowgroup.hpp" // for Rowgroup
+ #include <cstdint>
+ #include <fls/io/io.hpp>
+-#include <iostream>
+ #include <memory> // for unique_ptr
++#include <vector> // for std::vector
+ 
+ namespace fastlanes {
+ 
+diff --git a/src/expression/fsst12_expression.cpp b/src/expression/fsst12_expression.cpp
+index 4285ca3..f42e7e6 100644
+--- a/src/expression/fsst12_expression.cpp
++++ b/src/expression/fsst12_expression.cpp
+@@ -130,6 +130,8 @@ void dec_fsst12_opr::PointTo(const n_t vec_n) {
+ }
+ 
+ void dec_fsst12_opr::Decode(vector<uint8_t>& byte_arr_vec, vector<ofs_t>& length_vec) {
++	// Keep the native materializer's scratch buffer lazy, like the FSST path.
++	tmp_string.resize(CFG::String::max_bytes_per_string);
+ 	auto* in_byte_arr = reinterpret_cast<uint8_t*>(fsst12_bytes_segment_view.data);
+ 
+ 	length_vec.resize(length_vec.size() + CFG::VEC_SZ);
+diff --git a/src/expression/fsst_expression.cpp b/src/expression/fsst_expression.cpp
+index fe1bb6b..258dc9b 100644
+--- a/src/expression/fsst_expression.cpp
++++ b/src/expression/fsst_expression.cpp
+@@ -130,6 +130,9 @@ void dec_fsst_opr::PointTo(const n_t vec_n) {
+ }
+ 
+ void dec_fsst_opr::Decode(vector<uint8_t>& byte_arr_vec, vector<ofs_t>& length_vec) {
++	// The extension has its own output buffers; allocate this scratch space only
++	// when the native materializer calls Decode.
++	tmp_string.resize(CFG::String::max_bytes_per_string);
+ 	auto* in_byte_arr = reinterpret_cast<uint8_t*>(fsst_bytes_segment_view.data);
+ 
+ 	length_vec.resize(length_vec.size() + CFG::VEC_SZ);
+diff --git a/src/writer/rowgroup_writer.cpp b/src/writer/rowgroup_writer.cpp
+index 9f831bd..c055778 100644
+--- a/src/writer/rowgroup_writer.cpp
++++ b/src/writer/rowgroup_writer.cpp
+@@ -1,3 +1,8 @@
++// ────────────────────────────────────────────────────────
++// |                      FastLanes                       |
++// ────────────────────────────────────────────────────────
++// src/writer/rowgroup_writer.cpp
++// ────────────────────────────────────────────────────────
+ #include "fls/writer/rowgroup_writer.hpp"
+ #include "fls/encoder/encoder.hpp"
+ #include "fls/wizard/wizard.hpp"
+@@ -6,10 +11,12 @@
+ 
+ namespace fastlanes {
+ 
+-static void fill_in(col_pt& col, const n_t how_many_to_fill) {
++static void fill_in(col_pt& col, const n_t padded_count) {
+ 	visit(overloaded {
+ 	          [&](up<FLSStrColumn>& string_col) {
+ 		          const auto last_value_length = string_col->length_arr.back();
++		          const auto how_many_to_fill =
++		              padded_count > string_col->length_arr.size() ? padded_count - string_col->length_arr.size() : 0;
+ 
+ 		          for (n_t val_idx {0}; val_idx < how_many_to_fill; val_idx++) {
+ 			          const auto size = string_col->byte_arr.size();
+@@ -22,7 +29,9 @@ static void fill_in(col_pt& col, const n_t how_many_to_fill) {
+ 		          }
+ 	          },
+ 	          [&]<typename PT>(up<TypedCol<PT>>& typed_col) {
+-		          PT last_element = typed_col->data.back();
++		          PT         last_element = typed_col->data.back();
++		          const auto how_many_to_fill =
++		              padded_count > typed_col->data.size() ? padded_count - typed_col->data.size() : 0;
+ 		          for (n_t val_idx {0}; val_idx < how_many_to_fill; val_idx++) {
+ 			          typed_col->data.push_back(last_element);
+ 		          }
+@@ -80,8 +89,9 @@ void RowGroupWriter::Finalize() {
+ 			continue;
+ 		}
+ 
+-		const auto to_fill = file_writer.options.vector_size - leftover;
+-		fill_in(col_pt, to_fill);
++		// CSV input may already have vector padding. Append only missing values.
++		const auto padded_count = n_tuples_per_column[col_idx] + file_writer.options.vector_size - leftover;
++		fill_in(col_pt, padded_count);
+ 	}
+ 
+ 	rg.n_tup = n_tuples_per_column[0];
+diff --git a/test/standalone/integration_test.cpp b/test/standalone/integration_test.cpp
+index 3e4e156..3223148 100644
+--- a/test/standalone/integration_test.cpp
++++ b/test/standalone/integration_test.cpp
+@@ -1,3 +1,8 @@
++// ────────────────────────────────────────────────────────
++// |                      FastLanes                       |
++// ────────────────────────────────────────────────────────
++// test/standalone/integration_test.cpp
++// ────────────────────────────────────────────────────────
+ // Standalone regression tests for the branch-consolidation patches.
+ // No external data or test framework is required; checks also run under NDEBUG.
+ #include "fls/connection.hpp"
+@@ -5,6 +10,7 @@
+ #include "fls/file/file_header.hpp"
+ #include "fls/io/file.hpp"
+ #include "fls/reader/table_reader.hpp"
++#include "fls/table/table.hpp"
+ #include "fls/writer/file_writer.hpp"
+ #include <atomic>
+ #include <chrono>
+@@ -33,15 +39,14 @@ void CheckThrows(F&& operation) {
+ 	bool threw = false;
+ 	try {
+ 		operation();
+-	} catch (const std::exception&) {
+-		threw = true;
+-	}
++	} catch (const std::exception&) { threw = true; }
+ 	Check(threw, "Expected an I/O exception");
+ }
+ 
+ struct TempDirectory {
+-	fs::path path = fs::temp_directory_path() /
+-	                ("fastlanes-integration-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++	fs::path path =
++	    fs::temp_directory_path() /
++	    ("fastlanes-integration-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+ 	TempDirectory() {
+ 		Check(fs::create_directory(path), "Cannot create test directory");
+ 	}
+@@ -59,7 +64,7 @@ void WriteText(const fs::path& path, const std::string& text) {
+ }
+ 
+ void TestNewOutput(const fs::path& root) {
+-	const auto path = root / "new.bin";
++	const auto        path = root / "new.bin";
+ 	const std::string text = "new output";
+ 	{
+ 		File output(path); // Must not try to open a nonexistent output for reading.
+@@ -92,8 +97,8 @@ void TestConcurrentFirstRead(const fs::path& root) {
+ 	}
+ 	const auto path = root / "concurrent.bin";
+ 	WriteText(path, text);
+-	File input(path);
+-	std::atomic<bool> start {false};
++	File                           input(path);
++	std::atomic<bool>              start {false};
+ 	std::vector<std::future<void>> workers;
+ 	for (size_t worker = 0; worker < 8; ++worker) {
+ 		workers.push_back(std::async(std::launch::async, [&, worker] {
+@@ -102,7 +107,7 @@ void TestConcurrentFirstRead(const fs::path& root) {
+ 			}
+ 			for (size_t iteration = 0; iteration < 100; ++iteration) {
+ 				const auto offset = (worker * 127 + iteration * 31) % (text.size() - 64);
+-				const Buf buffer(64);
++				const Buf  buffer(64);
+ 				input.ReadRange(buffer, offset, 64);
+ 				Check(input.Size() == text.size(), "Concurrent Size mismatch");
+ 				Check(std::string(reinterpret_cast<const char*>(buffer.data()), 64) == text.substr(offset, 64),
+@@ -118,7 +123,7 @@ void TestConcurrentFirstRead(const fs::path& root) {
+ 
+ void TestReadErrors(const fs::path& root) {
+ 	const auto path = root / "missing.bin";
+-	File input(path);
++	File       input(path);
+ 	CheckThrows([&] { (void)input.Size(); });
+ 	// Failed call_once initialization must be retryable when the file appears.
+ 	WriteText(path, "abcdef");
+@@ -143,6 +148,28 @@ void TestEmptyFile(const fs::path& root) {
+ 	input.ReadRange(buffer, 0, 0);
+ }
+ 
++void TestNativeStringMaterialization(const fs::path& root, fastlanes::OperatorToken token) {
++	using namespace fastlanes;
++	const auto dir = root / (token == OperatorToken::EXP_FSST_DELTA ? "fsst" : "fsst12");
++	fs::create_directory(dir);
++	WriteText(dir / "schema.json", R"({"columns":[{"name":"value","type":"STRING"}]})");
++	std::string csv;
++	for (int i = 0; i < 2048; ++i) {
++		csv += "repeated-prefix-" + std::to_string(i) + "-string-payload\n";
++	}
++	WriteText(dir / "values.csv", csv);
++	Connection writer;
++	writer.force_schema_pool({token});
++	const auto output = dir / "output.fls";
++	writer.read_csv(dir).to_fls(output);
++	Connection reader;
++	const auto decoded = reader.read_fls(output)->materialize();
++	Check((writer.get_table() == *decoded).is_equal, "Native FSST table round trip mismatch");
++	const auto result = dir / "decoded.csv";
++	reader.read_fls(output)->to_csv(result);
++	Check(File::read(result) == csv, "Native FSST string materialization mismatch");
++}
++
+ void TestWriterOptions(const fs::path& root, bool forced_pool, bool inline_footer) {
+ 	using namespace fastlanes;
+ 	const auto dir = root / (forced_pool ? "pool" : "schema");
+@@ -171,14 +198,17 @@ void TestWriterOptions(const fs::path& root, bool forced_pool, bool inline_foote
+ 	FileHeader::Load(header, output);
+ 	Check(header.settings.inline_footer == config.inline_footer, "Connection footer option was lost");
+ 	Check(fs::exists(dir / FOOTER_NAME) == !inline_footer, "Unexpected external footer");
+-	auto reader = connection.read_fls(output);
++	auto        reader = connection.read_fls(output);
+ 	const auto* groups = reader->get_descriptor().m_rowgroup_descriptors();
+ 	Check(groups->size() == 1, "Expected one row group");
+ 	Check(groups->Get(0)->m_n_tuples() == 1031, "Partial-vector row count was lost");
+ 	const auto* operators = groups->Get(0)->m_column_descriptors()->Get(0)->encoding_rpn()->operator_tokens();
+ 	Check(operators->size() == 1 && operators->Get(0) == tokens[0], "Forced writer encoding was lost");
++	const auto decoded = reader->materialize();
++	Check((connection.get_table() == *decoded).is_equal, "Native integer table round trip mismatch");
+ 
+-	auto writer = FileWriter::Builder().WithPath(dir / "unused.fls").WithConnection(connection).WithSampleSize(3).Build();
++	auto writer =
++	    FileWriter::Builder().WithPath(dir / "unused.fls").WithConnection(connection).WithSampleSize(3).Build();
+ 	Check(writer->GetSampleSize() == 3, "Writer sample size was lost");
+ }
+ } // namespace
+@@ -192,7 +222,9 @@ int main() {
+ 		TestEmptyFile(root.path);
+ 		TestWriterOptions(root.path, false, false);
+ 		TestWriterOptions(root.path, true, true);
+-		std::cout << "All 6 standalone integration cases passed\n";
++		TestNativeStringMaterialization(root.path, fastlanes::OperatorToken::EXP_FSST_DELTA);
++		TestNativeStringMaterialization(root.path, fastlanes::OperatorToken::EXP_FSST12_DELTA);
++		std::cout << "All 8 standalone integration cases passed\n";
+ 		return 0;
+ 	} catch (const std::exception& error) {
+ 		std::cerr << error.what() << '\n';

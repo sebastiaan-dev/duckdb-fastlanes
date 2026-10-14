@@ -11,7 +11,6 @@
 
 namespace duckdb {
 struct FastLanesScanFilter;
-class ColumnDecoder;
 
 class FastLanesFileReaderOptions final : public BaseFileReaderOptions {
 public:
@@ -32,9 +31,9 @@ struct FastLanesUnionData : public BaseUnionData {
 
 struct FastLanesReadBindData final : TableFunctionData {
 	//! Number of rows in the first file, used for estimating the total cardinality of the to-be-read file(s).
-	idx_t initial_file_cardinality;
+	idx_t initial_file_cardinality = 0;
 	//! Number of vectors in the first file, used to determine the number of threads.
-	idx_t initial_file_n_rowgroups;
+	idx_t initial_file_n_rowgroups = 0;
 
 	unique_ptr<FastLanesFileReaderOptions> options;
 };
@@ -55,7 +54,9 @@ struct FastLanesReaderProjectionPlan {
 };
 
 struct FastLanesReadLocalState final : LocalTableFunctionState {
-	idx_t n_tuples;
+	//! Keep filter references alive and detect transitions between file readers.
+	shared_ptr<BaseFileReader> scan_reader;
+	idx_t                      n_tuples;
 	//! Row group which is being scanned by the worker, used to fetch row group related metadata.
 	idx_t cur_rowgroup;
 	//! Vector in the row group that is up for decoding, starts at 0 for every row group.

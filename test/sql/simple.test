@@ -1,43 +1,130 @@
 # name: test/sql/simple.test
-# description: Test loading FSST
+# description: Portable FastLanes round trip, projections, filters and virtual columns
 # group: [sql]
 
 require fastlanes
 
 statement ok
-install parquet
+SET threads=1;
 
 statement ok
-load parquet
+CREATE TABLE original AS
+SELECT i::INTEGER AS id, (i % 7)::INTEGER AS category,
+       'value-' || i::VARCHAR AS label, (i * 0.25)::DOUBLE AS amount
+FROM range(5003) t(i);
 
 statement ok
-set threads=1;
-
-# statement ok
-# describe select * from read_fls('benchmark/data/tpch/fls/tpch_sf10/lineitem.fls');
-
-# statement ok
-# create view lineitem_csv as select * from read_csv('benchmark/data/tpch/csv/tpch_sf0_1/lineitem.csv');
-
-# statement ok
-# create view customer_pq as select c_acctbal from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/customer.parquet');
-
-# statement ok
-# create view lineitem_pq as select l_tax from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/lineitem.parquet');
-# create view lineitem_pq as select * from read_parquet('benchmark/data/tpch/parquet/tpch_sf0_1/lineitem.parquet');
-
-
-# statement ok
-# copy lineitem_pq to 'lineitem.tax.fls' (FORMAT fls);
+COPY original TO '__TEST_DIR__/roundtrip.fls' (FORMAT fls, ROW_GROUP_SIZE 2048);
 
 statement ok
-create view lineitem as select * from read_fls('/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/fls/tpch_sf10_rg65536_lineitem.fls');
+CREATE VIEW roundtrip AS SELECT * FROM read_fls('__TEST_DIR__/roundtrip.fls');
 
-# statement ok
-# attach '/Users/sebastiaan/repos/duckdb-fastlanes/benchmark/data/tpch/duckdb/tpch_sf10_rg65536.duckdb' as db;
+query I
+SELECT count(*) FROM ((SELECT * FROM original EXCEPT ALL SELECT * FROM roundtrip)
+UNION ALL (SELECT * FROM roundtrip EXCEPT ALL SELECT * FROM original));
+----
+0
+
+# Count-only scan, including the partial final vector.
+query I
+SELECT count(*) FROM roundtrip;
+----
+5003
+
+query III
+SELECT min(id), max(id), sum(id) FROM roundtrip;
+----
+0	5002	12512503
+
+# Reordered/subset projections and filters that cross row-group boundaries.
+query TI
+SELECT label, id FROM roundtrip WHERE id IN (0, 2047, 2048, 4096, 5002) ORDER BY id;
+----
+value-0	0
+value-2047	2047
+value-2048	2048
+value-4096	4096
+value-5002	5002
+
+query I
+SELECT count(*) FROM roundtrip WHERE id >= 2040 AND id < 2060;
+----
+20
+
+query I
+SELECT count(*) FROM roundtrip WHERE id > 6000;
+----
+0
+
+query III
+SELECT count(*), min(file_row_number), max(file_row_number)
+FROM read_fls('__TEST_DIR__/roundtrip.fls', file_row_number=true);
+----
+5003	0	5002
+
+query I
+SELECT count(*) FROM read_fls('__TEST_DIR__/roundtrip.fls', file_row_number=true)
+WHERE id != file_row_number;
+----
+0
+
+query I
+SELECT count(*) FROM read_fls('__TEST_DIR__/roundtrip.fls', explicit_cardinality=5003);
+----
+5003
 
 statement ok
-SELECT l_returnflag, l_linestatus, sum(l_quantity) AS sum_qty, sum(l_extendedprice) AS sum_base_price, sum(l_extendedprice * (1 - l_discount)) AS sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) AS sum_charge, avg(l_quantity) AS avg_qty, avg(l_extendedprice) AS avg_price, avg(l_discount) AS avg_disc, count(*) AS count_order FROM lineitem WHERE l_shipdate <= CAST('1998-09-02' AS date) GROUP BY l_returnflag, l_linestatus ORDER BY l_returnflag, l_linestatus;
+SET threads=4;
 
-# statement ok
-# select count(distinct l_linestatus) from lineitem;
+query I
+SELECT count(*) FROM ((SELECT * FROM original EXCEPT ALL SELECT * FROM roundtrip)
+UNION ALL (SELECT * FROM roundtrip EXCEPT ALL SELECT * FROM original));
+----
+0
+
+# Use different physical column orders to exercise per-file filter mappings.
+statement ok
+COPY (SELECT id, label FROM original WHERE id < 2048)
+TO '__TEST_DIR__/union_a.fls' (FORMAT fls, ROW_GROUP_SIZE 2048);
+
+statement ok
+COPY (SELECT label, id FROM original WHERE id >= 2048)
+TO '__TEST_DIR__/union_b.fls' (FORMAT fls, ROW_GROUP_SIZE 2048);
+
+# Multiple readers must not share row-group cursors or retain stale filter mappings.
+foreach thread_count 1 4
+
+statement ok
+SET threads=${thread_count};
+
+query II
+SELECT count(*), sum(id) FROM read_fls(['__TEST_DIR__/roundtrip.fls', '__TEST_DIR__/roundtrip.fls']);
+----
+10006	25025006
+
+query I
+SELECT count(*) FROM read_fls(['__TEST_DIR__/roundtrip.fls', '__TEST_DIR__/roundtrip.fls'])
+WHERE id BETWEEN 2040 AND 2059;
+----
+40
+
+query II
+SELECT count(*), sum(id) FROM read_fls(['__TEST_DIR__/roundtrip.fls', '__TEST_DIR__/roundtrip.fls'], union_by_name=true);
+----
+10006	25025006
+
+query I
+SELECT count(*) FROM read_fls(['__TEST_DIR__/union_a.fls', '__TEST_DIR__/union_b.fls'], union_by_name=true)
+WHERE id BETWEEN 2040 AND 2059;
+----
+20
+
+query I
+SELECT count(*) FROM ((SELECT id, label FROM original EXCEPT ALL
+SELECT id, label FROM read_fls(['__TEST_DIR__/union_a.fls', '__TEST_DIR__/union_b.fls'], union_by_name=true))
+UNION ALL (SELECT id, label FROM read_fls(['__TEST_DIR__/union_a.fls', '__TEST_DIR__/union_b.fls'], union_by_name=true)
+EXCEPT ALL SELECT id, label FROM original));
+----
+0
+
+endloop

@@ -19,7 +19,6 @@ namespace duckdb {
 struct FastLanesScanFilter;
 class AdaptiveFilter;
 class ClientContext;
-class ColumnDecoder;
 
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.
@@ -37,7 +36,7 @@ public:
 	bool                       TryInitializeScan(ClientContext&            context,
 	                                             GlobalTableFunctionState& gstate,
 	                                             LocalTableFunctionState&  lstate) override;
-	void                       Scan(ClientContext&            context,
+	AsyncResult                Scan(ClientContext&            context,
 	                                GlobalTableFunctionState& global_state_p,
 	                                LocalTableFunctionState&  local_state_p,
 	                                DataChunk&                chunk) override;
@@ -62,37 +61,35 @@ public:
 private:
 	void Initialize();
 	struct ScanBatch {
-		idx_t start_tuple = 0;
-		idx_t count = 0;
+		idx_t start_tuple        = 0;
+		idx_t count              = 0;
 		idx_t input_vector_count = 0;
 
 		bool IsValid() const {
 			return input_vector_count > 0;
 		}
 	};
-	static bool         IsExternalDictOperatorToken(fastlanes::OperatorToken token);
-	static bool         HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
-	                                   const std::vector<uint32_t>&         column_ids);
-	bool                TryAssignNextRowGroup(FastLanesReadGlobalState& global_state, FastLanesReadLocalState& local_state);
-	void                InitializeScanFilters(ClientContext& ctx, FastLanesReadLocalState& local_state);
-	void                InitializeColumnDecoders(FastLanesReadLocalState& local_state);
-	ScanBatch           GetScanBatch(const FastLanesReadLocalState& local_state) const;
-	void                DecodePhysicalColumns(FastLanesReadLocalState& local_state,
-	                                          DataChunk&               chunk,
-	                                          idx_t                    start_vector,
-	                                          idx_t                    input_vector_count);
-	void                PopulateVirtualColumns(const FastLanesReadLocalState& local_state,
-	                                           DataChunk&               chunk,
-	                                           idx_t                    row_start,
-	                                           idx_t                    count);
+	static bool IsExternalDictOperatorToken(fastlanes::OperatorToken token);
+	static bool HasMccEncoding(const fastlanes::RowgroupDescriptor& rowgroup_descriptor,
+	                           const std::vector<uint32_t>&         column_ids);
+	bool        TryAssignNextRowGroup(FastLanesReadGlobalState& global_state, FastLanesReadLocalState& local_state);
+	void        InitializeScanFilters(ClientContext& ctx, FastLanesReadLocalState& local_state);
+	void        InitializeColumnDecoders(FastLanesReadLocalState& local_state);
+	ScanBatch   GetScanBatch(const FastLanesReadLocalState& local_state) const;
+	void        DecodePhysicalColumns(FastLanesReadLocalState& local_state,
+	                                  DataChunk&               chunk,
+	                                  idx_t                    start_vector,
+	                                  idx_t                    input_vector_count);
+	void
+	PopulateVirtualColumns(const FastLanesReadLocalState& local_state, DataChunk& chunk, idx_t row_start, idx_t count);
 	FastLanesReaderProjectionPlan BuildReaderProjectionPlan(idx_t rowgroup_idx);
-	const std::vector<idx_t>& GetRowGroupsToScan();
-	void EnsureFileRowNumberColumn();
-	bool IsFileRowNumberColumn(column_t column_id) const;
+	const std::vector<idx_t>&     GetRowGroupsToScan();
+	void                          EnsureFileRowNumberColumn();
+	bool                          IsFileRowNumberColumn(column_t column_id) const;
 
 private:
-	size_t                    total_vectors;
-	size_t                    total_tuples;
+	size_t                    total_vectors = 0;
+	size_t                    total_tuples  = 0;
 	unique_ptr<TableMetadata> table_metadata;
 	atomic<idx_t>             vectors_read;
 	RowGroupStatistics        rowgroup_statistics;

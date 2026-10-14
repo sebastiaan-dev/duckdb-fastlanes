@@ -259,9 +259,9 @@ FastLanesFileWriter::InitGlobal(ClientContext& context, FunctionData& bind_data_
 			const auto width = DecimalType::GetWidth(logical_type);
 			const auto scale = DecimalType::GetScale(logical_type);
 
-			auto decimal_info = make_uniq<fastlanes::DecimalTypeT>();
-			decimal_info->precision = width;
-			decimal_info->scale = scale;
+			auto decimal_info        = make_uniq<fastlanes::DecimalTypeT>();
+			decimal_info->precision  = width;
+			decimal_info->scale      = scale;
 			col->fix_me_decimal_type = std::move(decimal_info);
 		}
 

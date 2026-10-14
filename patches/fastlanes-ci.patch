@@ -1,0 +1,60 @@
+diff --git a/src/connection.cpp b/src/connection.cpp
+index 3c7d3f0..32cacf6 100644
+--- a/src/connection.cpp
++++ b/src/connection.cpp
+@@ -29,6 +29,7 @@
+ #include <filesystem>
+ #include <memory>    // for std::make_unique, unique_ptr
+ #include <stdexcept> // for std::runtime_error
++#include <utility>   // for std::move
+ 
+ namespace fastlanes {
+ 
+@@ -94,12 +95,12 @@ Connection& Connection::to_fls(const path& file_path) {
+ 
+ 	if (is_forced_schema()) {
+ 		const auto& pool = get_forced_schema();
+-		writer_builder.WithForcedSchema(vector(pool));
++		writer_builder.WithForcedSchema(vector<OperatorToken>(pool));
+ 	}
+ 
+ 	if (is_forced_schema_pool()) {
+ 		const auto& pool = get_forced_schema_pool();
+-		writer_builder.WithForcedSchemaPool(vector(pool));
++		writer_builder.WithForcedSchemaPool(vector<OperatorToken>(pool));
+ 	}
+ 
+ 	const auto writer = writer_builder.Build();
+diff --git a/src/include/fls/io/file.hpp b/src/include/fls/io/file.hpp
+index 1404140..94891dc 100644
+--- a/src/include/fls/io/file.hpp
++++ b/src/include/fls/io/file.hpp
+@@ -151,8 +151,8 @@ private:
+ 	void ReadInternal(uint8_t* dst, n_t size, off_t offset = 0) const;
+ 
+ private:
+-	path                    m_path;
+-	up<std::ofstream>       m_of_stream;
++	path              m_path;
++	up<std::ofstream> m_of_stream;
+ 	// Defer read-only I/O so a File can also create a new output file. call_once
+ 	// publishes the descriptor and size safely to concurrent positional readers.
+ 	mutable std::once_flag m_read_once;
+@@ -245,8 +245,17 @@ public:
+ 
+ private:
+ 	IoTracer() {
++#if defined(_MSC_VER)
++		char*  e      = nullptr;
++		size_t length = 0;
++		if (_dupenv_s(&e, &length, "FLS_IO_TRACE") == 0) {
++			enabled_ = (e && *e == '1');
++		}
++		std::free(e);
++#else
+ 		const char* e = std::getenv("FLS_IO_TRACE");
+ 		enabled_      = (e && *e == '1');
++#endif
+ 	}
+ 	static uint64_t tid64() {
+ 		auto id = std::this_thread::get_id();

@@ -118,14 +118,18 @@ int BitWidth(DataType t) {
 }
 
 std::optional<DataType> SmallestSignedAtLeastBits(int bits) {
-	if (bits <= 8)
+	if (bits <= 8) {
 		return DataType::INT8;
-	if (bits <= 16)
+	}
+	if (bits <= 16) {
 		return DataType::INT16;
-	if (bits <= 32)
+	}
+	if (bits <= 32) {
 		return DataType::INT32;
-	if (bits <= 64)
+	}
+	if (bits <= 64) {
 		return DataType::INT64;
+	}
 	return std::nullopt;
 }
 
@@ -162,10 +166,7 @@ std::optional<DataType> PromoteType(DataType first, DataType second) {
 
 		const int needed_signed_bits = std::max(s_bits, u_bits + 1);
 
-		if (auto t = SmallestSignedAtLeastBits(needed_signed_bits)) {
-			return *t;
-		}
-		return std::nullopt;
+		return SmallestSignedAtLeastBits(needed_signed_bits);
 	}
 
 	return std::nullopt;
@@ -187,7 +188,7 @@ SchemaBuildResult SchemaBuilder::Build() const {
 	}
 
 	const auto& first_rowgroup_descriptors = rowgroup_descriptors->Get(0)->m_column_descriptors();
-	const idx_t column_count             = first_rowgroup_descriptors->size();
+	const idx_t column_count               = first_rowgroup_descriptors->size();
 
 	result.column_names.resize(column_count);
 	result.promoted_types.resize(column_count, DataType::INVALID);
@@ -201,31 +202,30 @@ SchemaBuildResult SchemaBuilder::Build() const {
 	// 	result.promoted_types[col_idx] = type;
 	// }
 
-	
 	for (idx_t rowgroup_idx = 0; rowgroup_idx < rowgroup_descriptors->size(); ++rowgroup_idx) {
 		const auto& column_descriptors = rowgroup_descriptors->Get(rowgroup_idx)->m_column_descriptors();
 		if (column_descriptors->size() != column_count) {
 			throw std::runtime_error("FastLanesReader: inconsistent column counts across row groups");
 		}
-	
+
 		for (idx_t col_idx = 0; col_idx < column_count; ++col_idx) {
 			const auto& column_descriptor = column_descriptors->Get(col_idx);
 			const auto  current_type      = column_descriptor->data_type();
 			const auto  current_name      = column_descriptor->name()->c_str();
-	
+
 			if (rowgroup_idx == 0) {
 				result.column_names[col_idx]   = current_name;
 				result.promoted_types[col_idx] = current_type;
 				continue;
 			}
-	
+
 			if (current_name != result.column_names[col_idx]) {
 				std::ostringstream err;
 				err << "FastLanesReader: column index " << col_idx << " has name \"" << current_name
 				    << "\" but expected \"" << result.column_names[col_idx] << "\"";
 				throw std::runtime_error(err.str());
 			}
-	
+
 			auto promoted_type = PromoteType(result.promoted_types[col_idx], current_type);
 			if (!promoted_type.has_value()) {
 				std::ostringstream err;
@@ -234,7 +234,7 @@ SchemaBuildResult SchemaBuilder::Build() const {
 				    << ") across row groups";
 				throw std::runtime_error(err.str());
 			}
-	
+
 			result.promoted_types[col_idx] = *promoted_type;
 		}
 	}

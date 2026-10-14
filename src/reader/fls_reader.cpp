@@ -504,6 +504,16 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 		return false;
 	}
 
+	if (local_state.scan_reader.get() != this) {
+		// MultiFileFunction reuses local state across files. Filter references,
+		// column mappings and decoder contexts belong to the previous reader.
+		local_state.column_decoders.clear();
+		local_state.scan_filters.clear();
+		local_state.filters_by_col.clear();
+		local_state.adaptive_filter.reset();
+		local_state.scan_reader = shared_from_this();
+	}
+
 	InitializeScanFilters(ctx, local_state);
 	InitializeColumnDecoders(local_state);
 
@@ -513,16 +523,16 @@ bool FastLanesReader::TryInitializeScan(ClientContext&            ctx,
 	return true;
 }
 
-void FastLanesReader::Scan(ClientContext&            context,
-                           GlobalTableFunctionState& global_state_p,
-                           LocalTableFunctionState&  local_state_p,
-                           DataChunk&                chunk) {
+AsyncResult FastLanesReader::Scan(ClientContext&            context,
+                                  GlobalTableFunctionState& global_state_p,
+                                  LocalTableFunctionState&  local_state_p,
+                                  DataChunk&                chunk) {
 	auto& local_state = local_state_p.Cast<FastLanesReadLocalState>();
 
 	while (true) {
 		const auto batch = GetScanBatch(local_state);
 		if (!batch.IsValid()) {
-			return;
+			return SourceResultType::FINISHED;
 		}
 
 		DecodePhysicalColumns(local_state, chunk, local_state.cur_vector, batch.input_vector_count);
@@ -542,7 +552,7 @@ void FastLanesReader::Scan(ClientContext&            context,
 			continue;
 		}
 
-		return;
+		return SourceResultType::HAVE_MORE_OUTPUT;
 	}
 }
 

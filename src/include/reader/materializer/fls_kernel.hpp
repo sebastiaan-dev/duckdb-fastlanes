@@ -5,6 +5,7 @@
 #include "reader/materializer/fls_type_resolver.hpp"
 #include "reader/materializer/kernels/alp_kernel.hpp"
 #include "reader/materializer/kernels/alp_rd_kernel.hpp"
+#include "reader/materializer/kernels/boolean_kernel.hpp"
 #include "reader/materializer/kernels/constant_kernel.hpp"
 #include "reader/materializer/kernels/cross_rle_kernel.hpp"
 #include "reader/materializer/kernels/dictionary_kernel.hpp"

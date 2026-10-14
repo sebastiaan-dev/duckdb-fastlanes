@@ -4,11 +4,11 @@ IndentWidth: 4
 UseTab: ForIndentation
 DerivePointerAlignment: false
 PointerAlignment: Left
-AlignConsecutiveMacros: AcrossEmptyLinesAndComments
+AlignConsecutiveMacros: true
 AlignAfterOpenBracket: Align
 AlignTrailingComments: true
-AlignConsecutiveDeclarations: Consecutive
-AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: true
+AlignConsecutiveAssignments: true
 AllowAllArgumentsOnNextLine: true
 AllowAllConstructorInitializersOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
@@ -23,7 +23,7 @@ AllowShortLoopsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: Yes
 ColumnLimit: 120
 IncludeBlocks: Merge
-SortIncludes: CaseSensitive
+SortIncludes: true
 Language: Cpp
 AccessModifierOffset: -4
 BreakConstructorInitializers: BeforeComma
@@ -33,16 +33,3 @@ AllowShortIfStatementsOnASingleLine: false
 CompactNamespaces: true
 BinPackArguments: false
 BinPackParameters: false
-
-# CUDA-specific additions
-AttributeMacros:
-  - "__global__"
-  - "__device__"
-  - "__host__"
-  - "__constant__"
-  - "__shared__"
-  - "__managed__"
-  - "__restrict__"
-  - "__launch_bounds__"
-  - "__forceinline__"
-  - "__noinline__"

@@ -21,7 +21,7 @@ public:
 
 private:
 	const fastlanes::TableDescriptor& table_descriptor;
-	const std::string&                 file_path;
+	const std::string&                file_path;
 };
 
 } // namespace duckdb

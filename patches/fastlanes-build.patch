@@ -1,0 +1,40 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 43acdaa..07d6395 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -6,13 +6,15 @@
+ cmake_minimum_required(VERSION 3.22)
+ 
+ # Requirements : -------------------------------------------------------------------------------------------------------
+-find_program(CLANG_CXX NAMES clang++ REQUIRED)
+-find_program(CLANG_C NAMES clang REQUIRED)
+-
+-if (CLANG_CXX AND CLANG_C)
+-    # Set Clang as the compiler explicitly
+-    set(CMAKE_C_COMPILER "${CLANG_C}" CACHE STRING "C Compiler" FORCE)
+-    set(CMAKE_CXX_COMPILER "${CLANG_CXX}" CACHE STRING "C++ Compiler" FORCE)
++# Respect the embedding project's compiler/toolchain. Select Clang only for a
++# standalone build without an explicitly configured compiler.
++if (NOT DEFINED CMAKE_CXX_COMPILER)
++    find_program(CLANG_CXX NAMES clang++ REQUIRED)
++    set(CMAKE_CXX_COMPILER "${CLANG_CXX}" CACHE FILEPATH "C++ Compiler")
++endif ()
++if (NOT DEFINED CMAKE_C_COMPILER)
++    find_program(CLANG_C NAMES clang REQUIRED)
++    set(CMAKE_C_COMPILER "${CLANG_C}" CACHE FILEPATH "C Compiler")
+ endif ()
+ 
+ 
+diff --git a/src/table/stats.cpp b/src/table/stats.cpp
+index 701eaf1..40ad667 100644
+--- a/src/table/stats.cpp
++++ b/src/table/stats.cpp
+@@ -14,7 +14,7 @@ template <typename PT>
+ TypedStats<PT>::TypedStats()
+     : min {std::numeric_limits<PT>::max()}    //
+     , max {std::numeric_limits<PT>::lowest()} //
+-    , last_seen_val(0)                        // NOLINT
++    , last_seen_val {}
+     , n_nulls(0)
+     , is_double_castable(false) {
+ }
