@@ -59,11 +59,22 @@ add_compile_definitions(FLS_EXTENSION_CMAKE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_D
 # The extension relies on the writer, projection, table-API and positional-I/O
 # patches in this revision, not vanilla cwida/FastLanes. Override locally with
 # FETCHCONTENT_SOURCE_DIR_FLS_REPO (or FASTLANES_SOURCE_DIR via make).
+# Include patch contents in the FetchContent command so an existing build
+# reruns the patch step when this patch series changes.
+set(FLS_PATCH_SIGNATURE "")
+foreach(patch_file cmake/patch_fastlanes.cmake patches/fastlanes-build.patch
+                   patches/fastlanes-branch-consolidation.patch)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}")
+    file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}" patch_hash)
+    string(APPEND FLS_PATCH_SIGNATURE "${patch_hash}")
+endforeach()
+
 FetchContent_Declare(
         fls_repo
         URL https://codeload.github.com/sebastiaan-dev/fastlanes-patched/tar.gz/7f91afdbd916d24ab5b39a990fbdf7d9157c0f69
         URL_HASH SHA256=5cc986dab44d4a2d2b1fd8fd2e32645cd6cc1e9e03e950b1cb1615ee5415d5de
         PATCH_COMMAND ${CMAKE_COMMAND} -DFLS_SOURCE_DIR=<SOURCE_DIR>
+                      -DFLS_PATCH_SIGNATURE=${FLS_PATCH_SIGNATURE}
                       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_fastlanes.cmake
 )
 

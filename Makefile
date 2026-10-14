@@ -11,7 +11,7 @@ endif
 
 # Optional local FastLanes checkout (otherwise CMake fetches the pinned patch stack).
 ifneq ($(FASTLANES_SOURCE_DIR),)
-	EXT_FLAGS += -DFETCHCONTENT_SOURCE_DIR_FLS_REPO="$(abspath $(FASTLANES_SOURCE_DIR))"
+	override EXT_FLAGS += -DFETCHCONTENT_SOURCE_DIR_FLS_REPO="$(abspath $(FASTLANES_SOURCE_DIR))"
 endif
 
 # Include the Makefile from extension-ci-tools

@@ -6,7 +6,8 @@
 - extension-ci-tools submodule: `v1.5.6` (`3dc5c2a2754`)
 - FastLanes: `sebastiaan-dev/fastlanes-patched` at
   `7f91afdbd916d24ab5b39a990fbdf7d9157c0f69`, plus
-  [`patches/fastlanes-build.patch`](../patches/fastlanes-build.patch).
+  [`patches/fastlanes-build.patch`](../patches/fastlanes-build.patch) and
+  [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch).
 
 Use Clang (13 or newer), CMake (3.22 or newer), Ninja, Git and Python 3.
 The pinned FastLanes version requires C++20 and Clang; GCC is not supported by
@@ -22,9 +23,11 @@ make test
 ```
 
 CMake downloads a SHA-256-verified archive of the pinned FastLanes revision and
-applies the checked-in build patch. It does not follow a moving `dev` branch.
-The patch respects the embedding project's compiler/toolchain and fixes the
+applies the checked-in patch series. It does not follow a moving `dev` branch.
+The build patch respects the embedding project's compiler/toolchain and fixes the
 `TypedStats<std::string>` null-pointer construction caught by current Clang.
+The consolidation patch restores writer option forwarding and safe deferred
+positional I/O; see [the branch audit](branch-consolidation.md).
 
 Outputs:
 
@@ -57,7 +60,7 @@ make test
 
 `FASTLANES_SOURCE_DIR` maps to CMake's `FETCHCONTENT_SOURCE_DIR_FLS_REPO`.
 With this override, CMake uses the worktree **as-is** and does not download or
-patch it. The FastLanes worktree already contains the same build fixes.
+patch it. The FastLanes worktree already contains the same fixes and features.
 To return to the downloaded source in an existing build directory, pass
 `EXT_FLAGS=-DFETCHCONTENT_SOURCE_DIR_FLS_REPO=` (CMake caches this override).
 
@@ -80,7 +83,9 @@ The FastLanes worktree starts from that consolidated revision, imported via the
 `patched` remote; its `origin` still points to `sebastiaan-dev/FastLanes`, and
 `upstream` points to `cwida/FastLanes`. This preserves the extension's required
 patches without mixing in incompatible intermediate experiments. It is **not**
-a rebase onto the latest `cwida/FastLanes/dev`.
+a rebase onto the latest `cwida/FastLanes/dev`. Subsequent consolidation restores
+useful missing work from `update` and `task/ifstream-to-pread` and reconciles
+superseded branch histories; see [the branch audit](branch-consolidation.md).
 
 ## Migration and tests
 
