@@ -46,12 +46,14 @@ make test
 
 ## Recovery and deletion status
 
-Original branch tips are preserved locally as annotated tags under
+Original branch tips are preserved locally and on GitHub as annotated tags under
 `archive/branch-consolidation/origin/<branch>`. The previous integration commit is
 `archive/branch-consolidation/current`. A verified full Git bundle is stored at
 `~/repos/duckdb-fastlanes/.git/branch-archives/pre-consolidation.bundle`.
 
-No remote refs have been deleted or pushed. Once the consolidated branch and
-archive tags are published, dev and bench can be retired; retain main. There were
-no redundant local feature branches to delete, only main and the integration
+The consolidated `fix/duckdb-1.5.6` branch and all archive tags are published.
+After verifying the remote archives, `dev` and `bench` were deleted using an
+atomic push with exact-tip leases. Local remote-tracking refs were pruned.
+`main` and the repository default branch remain unchanged. There were no
+redundant local feature branches to delete, only main and the integration
 worktree branch.
