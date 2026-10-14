@@ -6,8 +6,9 @@
 - extension-ci-tools submodule: `v1.5.6` (`3dc5c2a2754`)
 - FastLanes: `sebastiaan-dev/fastlanes-patched` at
   `7f91afdbd916d24ab5b39a990fbdf7d9157c0f69`, plus
-  [`patches/fastlanes-build.patch`](../patches/fastlanes-build.patch) and
-  [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch).
+  [`patches/fastlanes-build.patch`](../patches/fastlanes-build.patch),
+  [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch), and
+  [`patches/fastlanes-ci.patch`](../patches/fastlanes-ci.patch).
 
 Use Clang (13 or newer), CMake (3.22 or newer), Ninja, Git and Python 3.
 The pinned FastLanes version requires C++20 and Clang; GCC is not supported by
@@ -28,6 +29,14 @@ The build patch respects the embedding project's compiler/toolchain and fixes th
 `TypedStats<std::string>` null-pointer construction caught by current Clang.
 The consolidation patch restores writer option forwarding and safe deferred
 positional I/O; see [the branch audit](branch-consolidation.md).
+The CI patch makes writer option forwarding compile with Clang 18, supplies the
+required `<utility>` include, and uses the supported Windows environment API.
+
+CI builds and tests Linux x86-64/arm64, macOS x86-64/arm64, and Windows x86-64
+explicitly with Clang. Linux builds run in manylinux 2.28 containers; the generic
+DuckDB distribution workflow selects incompatible GCC/MSVC toolchains for this
+library. Release-tag metadata is verified before building. Formatting uses
+clang-format 11 and static analysis uses clang-tidy 18; neither check is disabled.
 
 Outputs:
 

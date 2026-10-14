@@ -67,13 +67,11 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             -e CC -e CXX -e GEN -e CMAKE_BUILD_PARALLEL_LEVEL \
-            -e DUCKDB_PLATFORM -e EXT_FLAGS \
+            -e DUCKDB_PLATFORM -e EXT_FLAGS -e GITHUB_ACTIONS \
             "${{ matrix.image }}" bash -euxo pipefail -c '
               yum install -y clang
               export PATH=/opt/python/cp312-cp312/bin:$PATH
               python -m pip install cmake==3.31.6 ninja
-              # Use the modern manylinux GCC headers/runtime with the Clang driver.
-              export CXXFLAGS="--gcc-toolchain=$(dirname "$(dirname "$(readlink -f "$(command -v gcc)")")")"
               git config --global --add safe.directory "*"
               clang --version
               make release
