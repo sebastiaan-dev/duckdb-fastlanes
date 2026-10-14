@@ -11,7 +11,6 @@
 
 namespace duckdb {
 struct FastLanesScanFilter;
-class ColumnDecoder;
 
 class FastLanesFileReaderOptions final : public BaseFileReaderOptions {
 public:

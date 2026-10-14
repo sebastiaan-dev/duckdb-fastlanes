@@ -32,8 +32,9 @@ void t_decode_rle_range(const fastlanes::len_t* rle_lengths,
 	fastlanes::n_t current_index = start_rle_index;
 	fastlanes::n_t current_pos   = 0;
 
-	for (fastlanes::n_t i = 0; i < start_rle_index; ++i)
+	for (fastlanes::n_t i = 0; i < start_rle_index; ++i) {
 		current_pos += rle_lengths[i];
+	}
 
 	fastlanes::n_t offset      = range_index * 1024 - current_pos;
 	fastlanes::n_t decoded_pos = 0; // Track the correct position in decoded_arr
@@ -67,8 +68,9 @@ inline void t_decode_rle_range(const fastlanes::len_t* rle_lengths,
 	fastlanes::n_t current_pos   = 0;
 	idx_t          entries       = 0;
 
-	for (fastlanes::n_t i = 0; i < start_rle_index; ++i)
+	for (fastlanes::n_t i = 0; i < start_rle_index; ++i) {
 		current_pos += rle_lengths[i];
+	}
 
 	fastlanes::n_t offset = range_index * 1024 - current_pos;
 

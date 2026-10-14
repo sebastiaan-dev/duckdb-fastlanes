@@ -19,7 +19,6 @@ namespace duckdb {
 struct FastLanesScanFilter;
 class AdaptiveFilter;
 class ClientContext;
-class ColumnDecoder;
 
 /**
  * Provides an abstraction over the FastLanes file format which allows for implicit multithreaded support with DuckDB.

@@ -1,5 +1,6 @@
 find_package(Git REQUIRED)
-set(patches fastlanes-build.patch fastlanes-branch-consolidation.patch fastlanes-ci.patch)
+set(patches fastlanes-build.patch fastlanes-branch-consolidation.patch fastlanes-ci.patch
+            fastlanes-native-reader.patch)
 # Archive sources live inside the extension's worktree. Do not let git discover
 # that parent repository: git apply would then silently skip these paths.
 get_filename_component(source_parent "${FLS_SOURCE_DIR}" DIRECTORY)

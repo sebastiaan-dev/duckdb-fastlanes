@@ -7,8 +7,9 @@
 - FastLanes: `sebastiaan-dev/fastlanes-patched` at
   `7f91afdbd916d24ab5b39a990fbdf7d9157c0f69`, plus
   [`patches/fastlanes-build.patch`](../patches/fastlanes-build.patch),
-  [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch), and
-  [`patches/fastlanes-ci.patch`](../patches/fastlanes-ci.patch).
+  [`patches/fastlanes-branch-consolidation.patch`](../patches/fastlanes-branch-consolidation.patch),
+  [`patches/fastlanes-ci.patch`](../patches/fastlanes-ci.patch), and
+  [`patches/fastlanes-native-reader.patch`](../patches/fastlanes-native-reader.patch).
 
 Use Clang (13 or newer), CMake (3.22 or newer), Ninja, Git and Python 3.
 The pinned FastLanes version requires C++20 and Clang; GCC is not supported by
@@ -31,6 +32,9 @@ The consolidation patch restores writer option forwarding and safe deferred
 positional I/O; see [the branch audit](branch-consolidation.md).
 The CI patch makes writer option forwarding compile with Clang 18, supplies the
 required `<utility>` include, and uses the supported Windows environment API.
+The native-reader patch restores FSST/FSST12 scratch allocation, retains the
+connection's table after serialization, avoids duplicate vector padding, and
+adds native round-trip regressions.
 
 CI builds and tests Linux x86-64/arm64, macOS x86-64/arm64, and Windows x86-64
 explicitly with Clang. Linux builds run in manylinux 2.28 containers; the generic
